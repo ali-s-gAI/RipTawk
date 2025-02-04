@@ -1,5 +1,5 @@
 {
-  "originHash" : "6c749f4d807de8d638342f853a6a800cf6180116fe0a0099014f35c9b0540d25",
+  "originHash" : "556a3e20cd7a5496631dfd04a421a00f3f31d1fc6c4be53b18f14644ecb13121",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -8,15 +8,6 @@
       "state" : {
         "revision" : "60fa3dcfc52d09ed0411e9c4bc99928bf63656bd",
         "version" : "1.24.2"
-      }
-    },
-    {
-      "identity" : "camera",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Mijick/Camera.git",
-      "state" : {
-        "revision" : "5963b61bd82edb00165494aad728b1077d8d706a",
-        "version" : "3.0.1"
       }
     },
     {
@@ -143,15 +134,6 @@
       "state" : {
         "revision" : "c8a44d836fe7913603e246acab7c528c2e780168",
         "version" : "1.4.0"
-      }
-    },
-    {
-      "identity" : "timer",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Mijick/Timer",
-      "state" : {
-        "revision" : "342371c33c3f084d82a4818447ba77d858064c85",
-        "version" : "2.0.0"
       }
     },
     {
