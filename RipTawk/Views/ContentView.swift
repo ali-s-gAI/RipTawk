@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var isAuthenticated = false
     @State private var email = ""
     @State private var password = ""
+    @State private var name = ""
     @State private var isSignUp = false
     @State private var errorMessage = ""
     @State private var showError = false
@@ -30,6 +31,13 @@ struct ContentView: View {
                         Text("Welcome to RipTawk")
                             .font(.largeTitle)
                             .fontWeight(.bold)
+                        
+                        if isSignUp {
+                            TextField("Name", text: $name)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .autocapitalization(.words)
+                                .padding(.horizontal)
+                        }
                         
                         TextField("Email", text: $email)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -78,7 +86,7 @@ struct ContentView: View {
     private func login() {
         Task {
             do {
-                let session = try await AppwriteService.shared.account.createEmailSession(
+                let session = try await AppwriteService.shared.account.createEmailPasswordSession(
                     email: email,
                     password: password
                 )
@@ -101,7 +109,8 @@ struct ContentView: View {
                 let user = try await AppwriteService.shared.account.create(
                     userId: ID.unique(),
                     email: email,
-                    password: password
+                    password: password,
+                    name: name
                 )
                 print("User created successfully: \(user.id)")
                 // Automatically log in after successful signup
