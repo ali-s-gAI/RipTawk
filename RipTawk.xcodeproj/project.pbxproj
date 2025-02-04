@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		35566F552D51B3B900682139 /* Appwrite in Frameworks */ = {isa = PBXBuildFile; productRef = 35566F542D51B3B900682139 /* Appwrite */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		35566F172D516C4200682139 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				35566F552D51B3B900682139 /* Appwrite in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = RipTawk;
 			packageProductDependencies = (
+				35566F542D51B3B900682139 /* Appwrite */,
 			);
 			productName = RipTawk;
 			productReference = 35566F062D516C4000682139 /* RipTawk.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = 35566EFD2D516C4000682139;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				35566F532D51B3B900682139 /* XCRemoteSwiftPackageReference "sdk-for-apple" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 35566F072D516C4000682139 /* Products */;
 			projectDirPath = "";
@@ -396,6 +405,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"RipTawk/Preview Content\"";
+				DEVELOPMENT_TEAM = T6FVBJH929;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -424,6 +434,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"RipTawk/Preview Content\"";
+				DEVELOPMENT_TEAM = T6FVBJH929;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -552,6 +563,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		35566F532D51B3B900682139 /* XCRemoteSwiftPackageReference "sdk-for-apple" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/appwrite/sdk-for-apple";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		35566F542D51B3B900682139 /* Appwrite */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 35566F532D51B3B900682139 /* XCRemoteSwiftPackageReference "sdk-for-apple" */;
+			productName = Appwrite;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 35566EFE2D516C4000682139 /* Project object */;
 }
