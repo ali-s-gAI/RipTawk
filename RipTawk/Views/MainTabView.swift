@@ -14,36 +14,31 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             FeedView()
                 .tabItem {
-                    Image(systemName: "house.fill")
-                    Text("Home")
+                    Label("Home", systemImage: "house.fill")
                 }
                 .tag(0)
             
             DiscoverView()
                 .tabItem {
-                    Image(systemName: "magnifyingglass")
-                    Text("Discover")
+                    Label("Discover", systemImage: "magnifyingglass")
                 }
                 .tag(1)
             
-            RecordUploadView()
+            CreateView()
                 .tabItem {
-                    Image(systemName: "plus.circle.fill")
-                    Text("Create")
+                    Label("Create", systemImage: "plus.circle.fill")
                 }
                 .tag(2)
             
             VideosView()
                 .tabItem {
-                    Image(systemName: "film")
-                    Text("Projects")
+                    Label("Projects", systemImage: "film")
                 }
                 .tag(3)
             
             ProfileView()
                 .tabItem {
-                    Image(systemName: "person.fill")
-                    Text("Profile")
+                    Label("Profile", systemImage: "person.fill")
                 }
                 .tag(4)
         }

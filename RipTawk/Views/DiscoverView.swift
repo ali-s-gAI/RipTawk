@@ -8,24 +8,10 @@
 import SwiftUI
 
 struct DiscoverView: View {
-    @State private var searchText = ""
-    @State private var trendingVideos: [TrendingVideo] = []
-
     var body: some View {
         NavigationView {
-            VStack {
-                SearchBar(text: $searchText)
-                
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                        ForEach(trendingVideos) { video in
-                            TrendingVideoCell(video: video)
-                        }
-                    }
-                    .padding()
-                }
-            }
-            .navigationTitle("Discover")
+            Text("Discover View Coming Soon")
+                .navigationTitle("Discover")
         }
     }
 }
