@@ -1,5 +1,5 @@
 {
-  "originHash" : "6245226c0faef8006576459c8dcec5f479ea59afa7db5923339ff46e2dfb1225",
+  "originHash" : "6c749f4d807de8d638342f853a6a800cf6180116fe0a0099014f35c9b0540d25",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -17,6 +17,15 @@
       "state" : {
         "revision" : "5963b61bd82edb00165494aad728b1077d8d706a",
         "version" : "3.0.1"
+      }
+    },
+    {
+      "identity" : "imglykit-sp",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/imgly/imglykit-sp.git",
+      "state" : {
+        "revision" : "8fc99ac3fbb58edad7cdd65fffb349ea6d14d72b",
+        "version" : "11.10.2"
       }
     },
     {
@@ -143,6 +152,15 @@
       "state" : {
         "revision" : "342371c33c3f084d82a4818447ba77d858064c85",
         "version" : "2.0.0"
+      }
+    },
+    {
+      "identity" : "vesdk-ios-build",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/imgly/vesdk-ios-build",
+      "state" : {
+        "revision" : "0f1b498148c44760a8de76e68965ff4b546d5373",
+        "version" : "11.10.2"
       }
     }
   ],

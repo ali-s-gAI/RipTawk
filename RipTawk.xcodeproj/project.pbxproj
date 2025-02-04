@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		35566F552D51B3B900682139 /* Appwrite in Frameworks */ = {isa = PBXBuildFile; productRef = 35566F542D51B3B900682139 /* Appwrite */; };
 		35934FCD2D52784800374E2F /* MijickCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 35934FCC2D52784800374E2F /* MijickCamera */; };
+		359350022D52AF2A00374E2F /* VideoEditorSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 359350012D52AF2A00374E2F /* VideoEditorSDK */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,6 +33,7 @@
 		35566F062D516C4000682139 /* RipTawk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RipTawk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		35566F162D516C4200682139 /* RipTawkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RipTawkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		35566F202D516C4200682139 /* RipTawkUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RipTawkUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		359350052D52B24200374E2F /* license */ = {isa = PBXFileReference; lastKnownFileType = text; name = license; path = RipTawk/license; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -71,6 +73,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				35934FCD2D52784800374E2F /* MijickCamera in Frameworks */,
+				359350022D52AF2A00374E2F /* VideoEditorSDK in Frameworks */,
 				35566F552D51B3B900682139 /* Appwrite in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -95,6 +98,7 @@
 		35566EFD2D516C4000682139 = {
 			isa = PBXGroup;
 			children = (
+				359350052D52B24200374E2F /* license */,
 				35566F082D516C4000682139 /* RipTawk */,
 				35566F192D516C4200682139 /* RipTawkTests */,
 				35566F232D516C4200682139 /* RipTawkUITests */,
@@ -142,6 +146,7 @@
 			packageProductDependencies = (
 				35566F542D51B3B900682139 /* Appwrite */,
 				35934FCC2D52784800374E2F /* MijickCamera */,
+				359350012D52AF2A00374E2F /* VideoEditorSDK */,
 			);
 			productName = RipTawk;
 			productReference = 35566F062D516C4000682139 /* RipTawk.app */;
@@ -228,6 +233,7 @@
 			packageReferences = (
 				35566F532D51B3B900682139 /* XCRemoteSwiftPackageReference "sdk-for-apple" */,
 				358B7B2B2D52748B0035EA55 /* XCRemoteSwiftPackageReference "Camera" */,
+				359350002D52AF0300374E2F /* XCRemoteSwiftPackageReference "vesdk-ios-build" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 35566F072D516C4000682139 /* Products */;
@@ -616,6 +622,14 @@
 				minimumVersion = 3.0.1;
 			};
 		};
+		359350002D52AF0300374E2F /* XCRemoteSwiftPackageReference "vesdk-ios-build" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/imgly/vesdk-ios-build";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.10.2;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -628,6 +642,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 358B7B2B2D52748B0035EA55 /* XCRemoteSwiftPackageReference "Camera" */;
 			productName = MijickCamera;
+		};
+		359350012D52AF2A00374E2F /* VideoEditorSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 359350002D52AF0300374E2F /* XCRemoteSwiftPackageReference "vesdk-ios-build" */;
+			productName = VideoEditorSDK;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
