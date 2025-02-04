@@ -6,12 +6,15 @@
 //
 
 import SwiftUI
+import Appwrite
 
 struct SettingsView: View {
     @State private var notificationsEnabled = true
     @State private var darkModeEnabled = false
     @State private var autoSaveInterval = 5
     @State private var selectedQuality = VideoQuality.high
+    @State private var showSignOutAlert = false
+    @Environment(\.dismiss) private var dismiss
 
     enum VideoQuality: String, CaseIterable, Identifiable {
         case low, medium, high
@@ -22,11 +25,11 @@ struct SettingsView: View {
         NavigationView {
             Form {
                 Section(header: Text("Account")) {
-                    NavigationLink(destination: AccountSettingsView()) {
+                    NavigationLink("Account Settings") {
                         Text("Account Settings")
                     }
-                    NavigationLink(destination: Text("Subscription Details")) {
-                        Text("Subscription")
+                    NavigationLink("Subscription") {
+                        Text("Subscription Details")
                     }
                 }
                 
@@ -46,24 +49,42 @@ struct SettingsView: View {
                 }
                 
                 Section(header: Text("Support")) {
-                    NavigationLink(destination: Text("Help Center")) {
-                        Text("Help & Support")
+                    NavigationLink("Help & Support") {
+                        Text("Help Center")
                     }
-                    NavigationLink(destination: Text("About CreatorCut")) {
-                        Text("About")
+                    NavigationLink("About") {
+                        Text("About RipTawk")
                     }
                 }
                 
                 Section {
-                    Button(action: {
-                        // Perform logout
-                    }) {
-                        Text("Log Out")
-                            .foregroundColor(.red)
+                    Button(role: .destructive) {
+                        showSignOutAlert = true
+                    } label: {
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 }
             }
             .navigationTitle("Settings")
+            .alert("Sign Out", isPresented: $showSignOutAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Sign Out", role: .destructive) {
+                    signOut()
+                }
+            } message: {
+                Text("Are you sure you want to sign out?")
+            }
+        }
+    }
+    
+    private func signOut() {
+        Task {
+            do {
+                try await AppwriteService.shared.account.deleteSession(sessionId: "current")
+                NotificationCenter.default.post(name: .userDidSignOut, object: nil)
+            } catch {
+                print("Sign out error: \(error.localizedDescription)")
+            }
         }
     }
 }
@@ -101,5 +122,10 @@ struct AccountSettingsView: View {
         }
         .navigationTitle("Account Settings")
     }
+}
+
+// Add this extension somewhere in your project, like in a separate Notifications.swift file
+extension Notification.Name {
+    static let userDidSignOut = Notification.Name("userDidSignOut")
 }
 

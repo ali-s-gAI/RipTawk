@@ -6,81 +6,72 @@
 //
 
 import SwiftUI
+import Appwrite
 
 struct ProfileView: View {
-    @State private var username = "CreatorName"
-    @State private var bio = "Creative video maker | Follow for daily content"
-    @State private var followers = 10000
-    @State private var following = 500
-    @State private var likes = 50000
-    @State private var videos: [FeedVideo] = []
-
+    @State private var showSettings = false
+    @State private var username = ""
+    @State private var followers = 100
+    @State private var following = 50
+    
     var body: some View {
         NavigationView {
             ScrollView {
-                VStack(alignment: .center, spacing: 20) {
+                VStack(spacing: 20) {
                     Image(systemName: "person.circle.fill")
-                        .resizable()
-                        .frame(width: 100, height: 100)
-                        .clipShape(Circle())
+                        .font(.system(size: 80))
                     
                     Text(username)
                         .font(.title)
-                        .fontWeight(.bold)
                     
-                    Text(bio)
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                    
-                    HStack(spacing: 30) {
+                    HStack(spacing: 40) {
                         VStack {
                             Text("\(followers)")
                                 .font(.headline)
                             Text("Followers")
-                                .font(.caption)
+                                .foregroundColor(.gray)
                         }
+                        
                         VStack {
                             Text("\(following)")
                                 .font(.headline)
                             Text("Following")
-                                .font(.caption)
-                        }
-                        VStack {
-                            Text("\(likes)")
-                                .font(.headline)
-                            Text("Likes")
-                                .font(.caption)
+                                .foregroundColor(.gray)
                         }
                     }
                     
                     Button(action: {
-                        // Implement edit profile functionality
+                        // Edit profile action
                     }) {
                         Text("Edit Profile")
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity)
+                            .padding()
                             .background(Color.blue)
                             .foregroundColor(.white)
-                            .cornerRadius(20)
+                            .cornerRadius(10)
                     }
-                    
-                    Divider()
-                    
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 5) {
-                        ForEach(videos) { video in
-                            VideoThumbnail(video: video)
-                        }
+                    .padding(.horizontal)
+                }
+                .padding()
+            }
+            .navigationTitle("Profile")
+            .onAppear {
+                Task {
+                    if let currentUser = try? await AppwriteService.shared.account.get() {
+                        username = currentUser.name
                     }
-                    .padding()
                 }
             }
-            .navigationBarItems(trailing: Button(action: {
-                // Implement settings functionality
-            }) {
-                Image(systemName: "gearshape.fill")
-            })
-            .navigationBarTitle("Profile", displayMode: .inline)
+            .toolbar {
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+            }
         }
     }
 }

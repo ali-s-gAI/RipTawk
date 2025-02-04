@@ -8,105 +8,89 @@
 import SwiftUI
 import AVKit
 
+struct FeedVideo: Identifiable {
+    let id = UUID()
+    let title: String
+    let author: String
+    let likes: Int
+    let comments: Int
+    let videoURL: URL
+}
+
 struct FeedView: View {
     @State private var currentIndex = 0
     @State private var videos: [FeedVideo] = [
-        FeedVideo(id: UUID(), videoURL: URL(string: "https://example.com/video1.mp4")!, creator: "Creator1", description: "Awesome video #1", likes: 1000, comments: 50),
-        FeedVideo(id: UUID(), videoURL: URL(string: "https://example.com/video2.mp4")!, creator: "Creator2", description: "Check out this cool effect! #creatorTok", likes: 2500, comments: 120),
-        // Add more sample videos here
+        FeedVideo(title: "Cool Dance", author: "User1", likes: 1200, comments: 45, videoURL: URL(string: "https://example.com")!),
+        FeedVideo(title: "Funny Moment", author: "User2", likes: 800, comments: 30, videoURL: URL(string: "https://example.com")!),
     ]
-
+    
     var body: some View {
         GeometryReader { geometry in
             TabView(selection: $currentIndex) {
                 ForEach(videos.indices, id: \.self) { index in
                     FeedVideoView(video: videos[index])
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: geometry.size.height, height: geometry.size.width)
+                        .rotationEffect(.degrees(0)) // Prevents auto-rotation
+                        .frame(width: geometry.size.width, height: geometry.size.height)
                         .tag(index)
                 }
             }
-            .frame(width: geometry.size.height, height: geometry.size.width)
-            .rotationEffect(.degrees(90), anchor: .topLeading)
-            .offset(x: geometry.size.width)
             .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            .ignoresSafeArea()
         }
     }
-}
-
-struct FeedVideo: Identifiable {
-    let id: UUID
-    let videoURL: URL
-    let creator: String
-    let description: String
-    let likes: Int
-    let comments: Int
 }
 
 struct FeedVideoView: View {
     let video: FeedVideo
     @State private var isLiked = false
-    @State private var showComments = false
-
+    
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            VideoPlayer(player: AVPlayer(url: video.videoURL))
-                .edgesIgnoringSafeArea(.all)
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Image(systemName: "person.circle.fill")
-                        .resizable()
-                        .frame(width: 40, height: 40)
-                        .clipShape(Circle())
-                    
-                    Text(video.creator)
-                        .font(.headline)
+            Color.black // Placeholder for video
+                .overlay(
+                    Text("Video Player Here")
                         .foregroundColor(.white)
-                }
-                
-                Text(video.description)
-                    .font(.subheadline)
-                    .foregroundColor(.white)
-            }
-            .padding()
+                )
             
-            VStack(spacing: 20) {
-                Button(action: {
-                    isLiked.toggle()
-                }) {
-                    Image(systemName: isLiked ? "heart.fill" : "heart")
-                        .foregroundColor(isLiked ? .red : .white)
-                        .font(.system(size: 30))
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(video.author)
+                        .font(.headline)
+                    Text(video.title)
+                        .font(.subheadline)
                 }
+                .foregroundColor(.white)
+                .padding()
                 
-                Text("\(video.likes)")
+                Spacer()
+                
+                VStack(spacing: 20) {
+                    Button(action: { isLiked.toggle() }) {
+                        VStack {
+                            Image(systemName: isLiked ? "heart.fill" : "heart")
+                                .foregroundColor(isLiked ? .red : .white)
+                                .font(.system(size: 30))
+                            Text("\(video.likes)")
+                                .foregroundColor(.white)
+                        }
+                    }
+                    
+                    VStack {
+                        Image(systemName: "message")
+                            .font(.system(size: 30))
+                        Text("\(video.comments)")
+                    }
                     .foregroundColor(.white)
-                
-                Button(action: {
-                    showComments.toggle()
-                }) {
-                    Image(systemName: "message")
-                        .foregroundColor(.white)
-                        .font(.system(size: 30))
+                    
+                    Button(action: {}) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 30))
+                            .foregroundColor(.white)
+                    }
                 }
-                
-                Text("\(video.comments)")
-                    .foregroundColor(.white)
-                
-                Button(action: {
-                    // Implement share functionality
-                }) {
-                    Image(systemName: "arrowshape.turn.up.right")
-                        .foregroundColor(.white)
-                        .font(.system(size: 30))
-                }
+                .padding(.bottom, 60)
+                .padding(.trailing)
             }
-            .padding(.trailing)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        }
-        .sheet(isPresented: $showComments) {
-            CommentsView(video: video)
         }
     }
 }
