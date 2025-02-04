@@ -40,16 +40,13 @@ struct CreateView: View {
             }
             .navigationTitle("Create")
             .sheet(isPresented: $showCamera) {
-                CameraView(mode: .video) { result in
-                    switch result {
-                    case .success(let url):
-                        recordedVideoURL = url
-                    case .failure(let error):
-                        print("Camera error: \(error.localizedDescription)")
+                MCamera()
+                    .onVideoCaptured { videoURL, controller in
+                        recordedVideoURL = videoURL
+                        showCamera = false
                     }
-                    showCamera = false
-                }
-                .ignoresSafeArea()
+                    .startSession()
+                    .ignoresSafeArea()
             }
         }
     }
