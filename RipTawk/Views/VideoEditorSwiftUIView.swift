@@ -5,6 +5,9 @@ struct VideoEditorSwiftUIView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editedVideoURL: URL?
     @State private var showConfirmation = false
+    @State private var isUploading = false
+    @State private var showError = false
+    @State private var errorMessage = ""
     @AppStorage("selectedTab") private var selectedTab: Int = 0
     @StateObject private var projectManager = ProjectManager()
     
@@ -34,32 +37,51 @@ struct VideoEditorSwiftUIView: View {
                 if showConfirmation {
                     VStack {
                         Spacer()
-                        Button(action: {
-                            print("🎬 [EDITOR] User confirmed edits")
-                            if let url = editedVideoURL {
-                                print("🎬 [EDITOR] Creating project with video from: \(url.path)")
-                                // Create project with the edited video
-                                Task {
-                                    await projectManager.createProject(with: url)
-                                    // Switch to Projects tab (index 3)
-                                    selectedTab = 3
-                                    dismiss()
-                                }
-                            }
-                        }) {
-                            Text("Confirm Edits")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
+                        if isUploading {
+                            ProgressView("Uploading...")
                                 .padding()
-                                .background(Color.blue)
+                                .background(Color(.systemBackground))
                                 .cornerRadius(12)
+                        } else {
+                            Button(action: {
+                                print("🎬 [EDITOR] User confirmed edits")
+                                if let url = editedVideoURL {
+                                    print("🎬 [EDITOR] Creating project with video from: \(url.path)")
+                                    isUploading = true
+                                    Task {
+                                        do {
+                                            await projectManager.createProject(with: url)
+                                            // Switch to Projects tab (index 3)
+                                            selectedTab = 3
+                                            dismiss()
+                                        } catch {
+                                            print("❌ [EDITOR] Upload error: \(error)")
+                                            errorMessage = error.localizedDescription
+                                            showError = true
+                                            isUploading = false
+                                        }
+                                    }
+                                }
+                            }) {
+                                Text("Confirm Edits")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.blue)
+                                    .cornerRadius(12)
+                            }
+                            .padding()
                         }
-                        .padding()
                     }
                 }
             }
             .navigationBarBackButtonHidden(true)
+            .alert("Upload Error", isPresented: $showError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage)
+            }
         }
     }
 } 

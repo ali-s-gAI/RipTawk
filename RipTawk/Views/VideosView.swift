@@ -201,6 +201,8 @@ struct MediaPickerView: View {
     @Binding var isPresented: Bool
     let onSelect: (URL) -> Void
     @State private var selectedItems: [PhotosPickerItem] = []
+    @State private var showEditor = false
+    @State private var selectedVideoURL: URL?
     
     var body: some View {
         NavigationView {
@@ -223,8 +225,8 @@ struct MediaPickerView: View {
                         
                         try data.write(to: fileURL)
                         await MainActor.run {
-                            onSelect(fileURL)
-                            isPresented = false
+                            selectedVideoURL = fileURL
+                            showEditor = true
                         }
                     }
                 }
@@ -233,6 +235,18 @@ struct MediaPickerView: View {
             .toolbar {
                 Button("Cancel") {
                     isPresented = false
+                }
+            }
+            .fullScreenCover(isPresented: $showEditor) {
+                if let url = selectedVideoURL {
+                    VideoEditorSwiftUIView(video: Video(url: url))
+                        .onDisappear {
+                            // Only upload if the editor was dismissed with confirmation
+                            if let url = selectedVideoURL {
+                                onSelect(url)
+                                isPresented = false
+                            }
+                        }
                 }
             }
         }

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Appwrite
 import JSONCodable
 
@@ -139,6 +140,10 @@ class AppwriteService {
         
         // 2. Create video document in database
         print("📤 [UPLOAD] Creating document in collection: \(videosCollectionId)")
+        let now = Date()
+        let isoFormatter = ISO8601DateFormatter()
+        let isoDate = isoFormatter.string(from: now)
+        
         let document = try await databases.createDocument(
             databaseId: databaseId,
             collectionId: videosCollectionId,
@@ -147,7 +152,7 @@ class AppwriteService {
                 "title": title,
                 "videoFileId": file.id,
                 "duration": duration,
-                "createdAt": Date(),
+                "createdAt": isoDate,
                 "userId": currentUserId
             ] as [String : Any]
         )
@@ -159,7 +164,7 @@ class AppwriteService {
             title: title,
             videoFileId: file.id,
             duration: duration,
-            createdAt: Date(),
+            createdAt: now,
             userId: currentUserId
         )
     }
