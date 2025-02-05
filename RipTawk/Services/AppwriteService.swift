@@ -14,7 +14,7 @@ struct VideoProject: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id = "$id"       // Appwrite uses $id for document IDs
         case title
-        case videoFileId
+        case videoFileId = "videoFileID"  // Match the expected field name in Appwrite
         case duration
         case createdAt
         case userId
@@ -150,7 +150,7 @@ class AppwriteService {
             documentId: ID.unique(),
             data: [
                 "title": title,
-                "videoFileId": file.id,
+                "videoFileID": file.id,  // Changed to match expected field name
                 "duration": duration,
                 "createdAt": isoDate,
                 "userId": currentUserId
@@ -186,22 +186,56 @@ class AppwriteService {
         
         return try documents.documents.map { doc in
             let data = doc.data
-            guard let title = data["title"]?.value as? String,
-                  let videoFileId = data["videoFileId"]?.value as? String,
-                  let duration = data["duration"]?.value as? TimeInterval,
-                  let createdAt = data["createdAt"]?.value as? Date,
-                  let userId = data["userId"]?.value as? String else {
-                throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid document data"])
-            }
+            print("📥 [DEBUG] Document data: \(data)")
             
-            return VideoProject(
-                id: doc.id,
-                title: title,
-                videoFileId: videoFileId,
-                duration: duration,
-                createdAt: createdAt,
-                userId: userId
-            )
+            do {
+                guard let title = data["title"]?.value as? String else {
+                    print("❌ [DEBUG] Invalid title: \(String(describing: data["title"]))")
+                    throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid title"])
+                }
+                
+                guard let videoFileId = data["videoFileID"]?.value as? String else {
+                    print("❌ [DEBUG] Invalid videoFileID: \(String(describing: data["videoFileID"]))")
+                    throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid videoFileID"])
+                }
+                
+                guard let duration = data["duration"]?.value as? TimeInterval else {
+                    print("❌ [DEBUG] Invalid duration: \(String(describing: data["duration"]))")
+                    throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid duration"])
+                }
+                
+                // Handle date parsing
+                let createdAt: Date
+                if let dateString = data["createdAt"]?.value as? String {
+                    let isoFormatter = ISO8601DateFormatter()
+                    if let date = isoFormatter.date(from: dateString) {
+                        createdAt = date
+                    } else {
+                        print("❌ [DEBUG] Invalid date format: \(dateString)")
+                        throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid date format"])
+                    }
+                } else {
+                    print("❌ [DEBUG] Missing createdAt: \(String(describing: data["createdAt"]))")
+                    throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Missing createdAt"])
+                }
+                
+                guard let userId = data["userId"]?.value as? String else {
+                    print("❌ [DEBUG] Invalid userId: \(String(describing: data["userId"]))")
+                    throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid userId"])
+                }
+                
+                return VideoProject(
+                    id: doc.id,
+                    title: title,
+                    videoFileId: videoFileId,
+                    duration: duration,
+                    createdAt: createdAt,
+                    userId: userId
+                )
+            } catch {
+                print("❌ [DEBUG] Error parsing document \(doc.id): \(error)")
+                throw error
+            }
         }
     }
     
@@ -261,5 +295,64 @@ class AppwriteService {
             print("❌ [DELETE] Error during deletion: \(error.localizedDescription)")
             throw error
         }
+    }
+    
+    func updateVideo(project: VideoProject, newVideoURL: URL, duration: TimeInterval) async throws -> VideoProject {
+        print("📤 [UPDATE] Starting video update for project: \(project.id)")
+        
+        guard !currentUserId.isEmpty else {
+            print("❌ [UPDATE] Error: User not logged in")
+            throw NSError(domain: "AppwriteService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
+        }
+        
+        // Verify ownership
+        guard project.userId == currentUserId else {
+            print("❌ [UPDATE] Error: User does not own this video")
+            throw NSError(domain: "AppwriteService", code: 403, userInfo: [NSLocalizedDescriptionKey: "You don't have permission to update this video"])
+        }
+        
+        // 1. Delete old file from storage
+        print("🗑 [UPDATE] Deleting old file: \(project.videoFileId)")
+        try await storage.deleteFile(
+            bucketId: videoBucketId,
+            fileId: project.videoFileId
+        )
+        
+        // 2. Upload new file to storage
+        print("📤 [UPDATE] Uploading new file to bucket: \(videoBucketId)")
+        let file = try await storage.createFile(
+            bucketId: videoBucketId,
+            fileId: ID.unique(),
+            file: InputFile.fromPath(newVideoURL.path)
+        )
+        print("📤 [UPDATE] New video file uploaded with ID: \(file.id)")
+        
+        // 3. Update document in database
+        print("📤 [UPDATE] Updating document in collection: \(videosCollectionId)")
+        let now = Date()
+        let isoFormatter = ISO8601DateFormatter()
+        let isoDate = isoFormatter.string(from: now)
+        
+        let document = try await databases.updateDocument(
+            databaseId: databaseId,
+            collectionId: videosCollectionId,
+            documentId: project.id,
+            data: [
+                "videoFileID": file.id,
+                "duration": duration,
+                "updatedAt": isoDate
+            ] as [String : Any]
+        )
+        print("📤 [UPDATE] Document updated with ID: \(document.id)")
+        
+        // 4. Create and return updated VideoProject
+        return VideoProject(
+            id: document.id,
+            title: project.title,
+            videoFileId: file.id,
+            duration: duration,
+            createdAt: project.createdAt,
+            userId: currentUserId
+        )
     }
 } 

@@ -5,12 +5,16 @@ import VideoEditorSDK
 struct VideoPreviewView: View {
     let videoURL: URL
     @Binding var isPresented: Bool
+    @Binding var recordedVideoURL: URL?
     @State private var player: AVPlayer?
     @State private var shouldNavigateToEditor = false
+    @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         NavigationStack {
             ZStack {
+                Color.black.ignoresSafeArea()
+                
                 if let player = player {
                     VideoPlayer(player: player)
                         .ignoresSafeArea()
@@ -20,6 +24,8 @@ struct VideoPreviewView: View {
                     HStack {
                         Button(action: { 
                             print("🎥 [PREVIEW] User tapped Dismiss")
+                            player?.pause()
+                            player = nil
                             isPresented = false 
                         }) {
                             Image(systemName: "xmark")
@@ -35,10 +41,9 @@ struct VideoPreviewView: View {
                     HStack(spacing: 40) {
                         Button(action: { 
                             print("🎥 [PREVIEW] User tapped Retake")
-                            // Clean up player
                             player?.pause()
                             player = nil
-                            // Dismiss all the way back
+                            recordedVideoURL = nil
                             isPresented = false 
                         }) {
                             VStack {
@@ -70,9 +75,12 @@ struct VideoPreviewView: View {
                 VideoEditorSwiftUIView(video: Video(url: videoURL))
                     .onAppear {
                         print("🎥 [PREVIEW] Navigating to editor")
-                        // Clean up player before navigating
                         player?.pause()
                         player = nil
+                        // Set the recorded URL when continuing to editor
+                        recordedVideoURL = videoURL
+                        // Dismiss the preview
+                        isPresented = false
                     }
             }
         }

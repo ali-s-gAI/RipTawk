@@ -13,6 +13,17 @@ struct VideoEditorSwiftUIView: View {
     
     // The video being edited.
     let video: Video
+    // Optional project to update (if editing existing project)
+    var existingProject: VideoProject?
+    
+    private func cleanupOriginalVideo() {
+        do {
+            try FileManager.default.removeItem(at: video.url)
+            print("🧹 [EDITOR] Cleaned up original video: \(video.url.path)")
+        } catch {
+            print("⚠️ [EDITOR] Could not clean up original video: \(error)")
+        }
+    }
     
     var body: some View {
         NavigationStack {
@@ -46,14 +57,29 @@ struct VideoEditorSwiftUIView: View {
                             Button(action: {
                                 print("🎬 [EDITOR] User confirmed edits")
                                 if let url = editedVideoURL {
-                                    print("🎬 [EDITOR] Creating project with video from: \(url.path)")
+                                    print("🎬 [EDITOR] Creating/updating project with video from: \(url.path)")
                                     isUploading = true
                                     Task {
                                         do {
-                                            await projectManager.createProject(with: url)
-                                            // Switch to Projects tab (index 3)
+                                            if let project = existingProject {
+                                                // Update existing project
+                                                print("🎬 [EDITOR] Updating existing project: \(project.id)")
+                                                await projectManager.updateProject(project, with: url)
+                                            } else {
+                                                // Create new project
+                                                print("🎬 [EDITOR] Creating new project")
+                                                await projectManager.createProject(with: url)
+                                            }
+                                            
+                                            // Clean up the original video after successful upload
+                                            cleanupOriginalVideo()
+                                            
+                                            // Switch to Projects tab (index 3) and dismiss all views
                                             selectedTab = 3
+                                            // Dismiss all the way back to root
                                             dismiss()
+                                            // Give time for the tab switch before dismissing
+                                            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
                                         } catch {
                                             print("❌ [EDITOR] Upload error: \(error)")
                                             errorMessage = error.localizedDescription
@@ -63,7 +89,7 @@ struct VideoEditorSwiftUIView: View {
                                     }
                                 }
                             }) {
-                                Text("Confirm Edits")
+                                Text(existingProject != nil ? "Save Changes" : "Confirm Edits")
                                     .font(.headline)
                                     .foregroundColor(.white)
                                     .frame(maxWidth: .infinity)

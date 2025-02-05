@@ -117,7 +117,7 @@ struct ProjectGridItem: View {
     var body: some View {
         NavigationLink {
             if let url = videoURL {
-                VideoEditorSwiftUIView(video: Video(url: url))
+                VideoEditorSwiftUIView(video: Video(url: url), existingProject: project)
             } else {
                 ProgressView("Loading video...")
                     .task {
@@ -298,6 +298,35 @@ class ProjectManager: ObservableObject {
             
         } catch {
             print("❌ Error creating project: \(error)")
+        }
+    }
+    
+    func updateProject(_ project: VideoProject, with videoURL: URL) async {
+        do {
+            let asset = AVURLAsset(url: videoURL)
+            let duration = try await asset.load(.duration).seconds
+            
+            // Save to local storage first
+            let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let savedURL = documentsURL.appendingPathComponent("video_\(UUID().uuidString).mov")
+            
+            try FileManager.default.copyItem(at: videoURL, to: savedURL)
+            
+            // Update project in Appwrite
+            let updatedProject = try await appwriteService.updateVideo(
+                project: project,
+                newVideoURL: savedURL,
+                duration: duration
+            )
+            
+            // Update in local array
+            if let index = projects.firstIndex(where: { $0.id == project.id }) {
+                projects[index] = updatedProject
+            }
+            print("✅ Updated project with ID: \(project.id)")
+            
+        } catch {
+            print("❌ Error updating project: \(error)")
         }
     }
     
