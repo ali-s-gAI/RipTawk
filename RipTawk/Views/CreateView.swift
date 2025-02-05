@@ -56,6 +56,7 @@ struct CameraRecordingView: View {
                 HStack {
                     Button(action: { 
                         print("🎥 [CAMERA] Closing camera view")
+                        cameraManager.stopCaptureSession()
                         isPresented = false 
                     }) {
                         Image(systemName: "xmark")
@@ -96,6 +97,14 @@ struct CameraRecordingView: View {
                 }
                 .padding(.bottom, 60)
             }
+        }
+        .onAppear {
+            print("🎥 [CAMERA] View appeared, starting capture session")
+            cameraManager.startCaptureSession()
+        }
+        .onDisappear {
+            print("🎥 [CAMERA] View disappeared, stopping capture session")
+            cameraManager.stopCaptureSession()
         }
         .onChange(of: cameraManager.recordedVideoURL) { _, url in
             if let url = url {
@@ -152,6 +161,7 @@ struct CameraPreview: UIViewRepresentable {
 class CameraManager: NSObject, ObservableObject {
     @Published var recordedVideoURL: URL?
     @Published var isRecording = false
+    @Published private(set) var isSetup = false
     
     let captureSession = AVCaptureSession()
     var videoOutput: AVCaptureMovieFileOutput?
@@ -160,12 +170,14 @@ class CameraManager: NSObject, ObservableObject {
     
     override init() {
         super.init()
-        setupCaptureSession()
+        // Don't setup capture session immediately
         checkPhotoLibraryPermission()
     }
     
     deinit {
         cleanup()
+        // Stop capture session when deinited
+        captureSession.stopRunning()
     }
     
     private func cleanup() {
@@ -190,6 +202,19 @@ class CameraManager: NSObject, ObservableObject {
                 print("❌ [CAMERA] Photos access not authorized")
             }
         }
+    }
+    
+    func startCaptureSession() {
+        guard !isSetup else { return }
+        setupCaptureSession()
+        isSetup = true
+    }
+    
+    func stopCaptureSession() {
+        guard isSetup else { return }
+        captureSession.stopRunning()
+        isSetup = false
+        print("✅ [CAMERA] Stopped capture session")
     }
     
     private func setupCaptureSession() {

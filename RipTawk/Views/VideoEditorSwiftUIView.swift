@@ -13,25 +13,19 @@ struct VideoEditorSwiftUIView: View {
     @AppStorage("selectedTab") private var selectedTab: Int = 0
     @StateObject private var projectManager = ProjectManager()
     
-    // The video being edited - now using ImglyKit.Video
-    let video: ImglyKit.Video
+    // The video being edited
+    let videoURL: URL
     var existingProject: VideoProject?
     
     init(video url: URL, existingProject: VideoProject? = nil) {
-        self.video = ImglyKit.Video(url: url)
+        self.videoURL = url
         self.existingProject = existingProject
     }
     
     private func cleanupOriginalVideo() {
         do {
-            // Cast AVAsset to AVURLAsset to get the URL
-            guard let urlAsset = video.asset as? AVURLAsset else {
-                print("⚠️ [EDITOR] Could not get URL from asset")
-                return
-            }
-            let originalURL = urlAsset.url
-            try FileManager.default.removeItem(at: originalURL)
-            print("🧹 [EDITOR] Cleaned up original video: \(originalURL.path)")
+            try FileManager.default.removeItem(at: videoURL)
+            print("🧹 [EDITOR] Cleaned up original video: \(videoURL.path)")
         } catch {
             print("⚠️ [EDITOR] Could not clean up original video: \(error)")
         }
@@ -40,7 +34,7 @@ struct VideoEditorSwiftUIView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                VideoEditor(video: video)
+                VideoEditor(video: ImglyKit.Video(url: videoURL))
                     .onDidSave { result in
                         // The user exported a new video successfully
                         print("🎬 [EDITOR] Received edited video at \(result.output.url.absoluteString)")
@@ -53,7 +47,8 @@ struct VideoEditorSwiftUIView: View {
                     }
                     .onDidFail { error in
                         print("🎬 [EDITOR] Error: \(error.localizedDescription)")
-                        dismiss()
+                        errorMessage = error.localizedDescription
+                        showError = true
                     }
                     .ignoresSafeArea()
                 

@@ -247,10 +247,8 @@ class AppwriteService {
             fileId: fileId
         )
         
-        let urlString = try await storage.getFileView(
-            bucketId: videoBucketId,
-            fileId: fileId
-        ).description
+        // Construct the download URL using Appwrite's URL structure
+        let urlString = "\(client.endPoint)/storage/buckets/\(videoBucketId)/files/\(fileId)/download"
         
         guard let url = URL(string: urlString) else {
             throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid video URL"])
