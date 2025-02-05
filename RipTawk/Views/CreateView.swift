@@ -7,6 +7,7 @@ import Photos
 struct CreateView: View {
     @State private var showCamera = false
     @State private var recordedVideoURL: URL?
+    @StateObject private var cameraManager = CameraManager()
     
     var body: some View {
         NavigationView {
@@ -63,159 +64,62 @@ struct CameraRecordingView: View {
         ZStack {
             CameraPreview(cameraManager: cameraManager)
                 .ignoresSafeArea()
-                .onAppear {
-                    print("🎥 Camera view appeared, initializing camera")
-                    cameraManager.setupCaptureSession()
-                }
-                .onDisappear {
-                    print("🎥 Camera view disappeared, stopping camera")
-                    cameraManager.stopCaptureSession()
-                }
             
             VStack {
-                if !showPreview {
-                    HStack {
-                        Button(action: { 
-                            print("🎥 User cancelled recording session")
-                            isPresented = false 
-                        }) {
-                            Image(systemName: "xmark")
-                                .font(.title2)
-                                .foregroundColor(.white)
-                                .padding()
-                        }
-                        Spacer()
+                HStack {
+                    Button(action: { isPresented = false }) {
+                        Image(systemName: "xmark")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .padding()
                     }
-                    
                     Spacer()
-                    
-                    // Record button
-                    Button(action: {
+                }
+                
+                Spacer()
+                
+                // Record button
+                Button(action: {
+                    if cameraManager.isRecording {
+                        cameraManager.stopRecording()
+                    } else {
+                        cameraManager.startRecording()
+                    }
+                }) {
+                    ZStack {
+                        Circle()
+                            .strokeBorder(.white, lineWidth: 8)
+                            .frame(width: 84, height: 84)
+                        
                         if cameraManager.isRecording {
-                            print("🎥 User stopped recording")
-                            cameraManager.stopRecording()
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(.red)
+                                .frame(width: 36, height: 36)
                         } else {
-                            print("🎥 User started recording")
-                            cameraManager.startRecording()
-                        }
-                    }) {
-                        ZStack {
                             Circle()
-                                .strokeBorder(.white, lineWidth: 8)
-                                .frame(width: 84, height: 84)
-                            
-                            if cameraManager.isRecording {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(.red)
-                                    .frame(width: 36, height: 36)
-                            } else {
-                                Circle()
-                                    .fill(.red)
-                                    .frame(width: 60, height: 60)
-                            }
+                                .fill(.red)
+                                .frame(width: 60, height: 60)
                         }
                     }
-                    .padding(.bottom, 60)
                 }
+                .padding(.bottom, 60)
             }
         }
         .onChange(of: cameraManager.recordedVideoURL) { _, url in
             if let url = url {
-                print("🎥 Recording saved to: \(url.path)")
                 previewURL = url
                 showPreview = true
             }
         }
-        .overlay {
-            if showPreview, let url = previewURL {
-                VideoPreviewOverlay(
-                    videoURL: url,
-                    onRetake: {
-                        print("🎥 User chose to retake video")
-                        showPreview = false
-                        previewURL = nil
-                        cameraManager.recordedVideoURL = nil
-                    },
-                    onContinue: { url in
-                        print("🎥 User chose to continue with video")
-                        recordedVideoURL = url
-                        isPresented = false
-                    }
-                )
-            }
-        }
-    }
-}
-
-struct VideoPreviewOverlay: View {
-    let videoURL: URL
-    let onRetake: () -> Void
-    let onContinue: (URL) -> Void
-    
-    @State private var player: AVPlayer
-    
-    init(videoURL: URL, onRetake: @escaping () -> Void, onContinue: @escaping (URL) -> Void) {
-        self.videoURL = videoURL
-        self.onRetake = onRetake
-        self.onContinue = onContinue
-        self._player = State(initialValue: AVPlayer(url: videoURL))
-    }
-    
-    var body: some View {
-        ZStack {
-            Color.black
-                .ignoresSafeArea()
-            
-            VideoPlayer(player: player)
-                .ignoresSafeArea()
-            
-            VStack {
-                HStack {
-                    Button(action: onRetake) {
-                        HStack {
-                            Image(systemName: "arrow.counterclockwise")
-                            Text("Retake")
+        .fullScreenCover(isPresented: $showPreview) {
+            if let url = previewURL {
+                VideoPreviewView(videoURL: url, isPresented: $showPreview)
+                    .onDisappear {
+                        if recordedVideoURL != nil {
+                            isPresented = false
                         }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .padding()
                     }
-                    
-                    Spacer()
-                    
-                    Button(action: { onContinue(videoURL) }) {
-                        HStack {
-                            Text("Continue")
-                            Image(systemName: "arrow.right")
-                        }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .padding()
-                    }
-                }
-                .padding(.horizontal)
-                
-                Spacer()
             }
-        }
-        .onAppear {
-            print("🎥 Starting video preview playback")
-            player.seek(to: .zero)
-            player.play()
-            
-            // Loop the preview
-            NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime,
-                object: player.currentItem,
-                queue: .main
-            ) { _ in
-                player.seek(to: .zero)
-                player.play()
-            }
-        }
-        .onDisappear {
-            print("🎥 Stopping video preview playback")
-            player.pause()
         }
     }
 }
@@ -244,56 +148,39 @@ class CameraManager: NSObject, ObservableObject {
     
     override init() {
         super.init()
-        print("🎥 CameraManager initialized")
+        setupCaptureSession()
+        checkPhotoLibraryPermission()
     }
     
-    private func checkPhotoLibraryPermission(completion: @escaping (Bool) -> Void) {
+    private func checkPhotoLibraryPermission() {
         PHPhotoLibrary.requestAuthorization { status in
-            DispatchQueue.main.async {
-                if status == .authorized {
-                    print("📱 Photo library access granted")
-                    completion(true)
-                } else {
-                    print("⚠️ Photo library access denied")
-                    completion(false)
-                }
+            if status != .authorized {
+                print("Photos access not authorized")
             }
         }
     }
     
-    func setupCaptureSession() {
-        print("🎥 Setting up camera session")
+    private func setupCaptureSession() {
         guard let videoDevice = AVCaptureDevice.default(for: .video),
               let videoInput = try? AVCaptureDeviceInput(device: videoDevice),
               let audioDevice = AVCaptureDevice.default(for: .audio),
               let audioInput = try? AVCaptureDeviceInput(device: audioDevice) else {
-            print("⚠️ Failed to set up camera inputs")
             return
         }
         
         if captureSession.canAddInput(videoInput) && captureSession.canAddInput(audioInput) {
             captureSession.addInput(videoInput)
             captureSession.addInput(audioInput)
-            print("🎥 Camera inputs added successfully")
         }
         
         let videoOutput = AVCaptureMovieFileOutput()
         if captureSession.canAddOutput(videoOutput) {
             captureSession.addOutput(videoOutput)
             self.videoOutput = videoOutput
-            print("🎥 Camera output configured")
         }
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.captureSession.startRunning()
-            print("🎥 Camera session started")
-        }
-    }
-    
-    func stopCaptureSession() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.captureSession.stopRunning()
-            print("🎥 Camera session stopped")
         }
     }
     
@@ -304,14 +191,12 @@ class CameraManager: NSObject, ObservableObject {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mov")
         
-        print("🎥 Starting recording to: \(tempURL.path)")
         videoOutput.startRecording(to: tempURL, recordingDelegate: self)
         isRecording = true
     }
     
     func stopRecording() {
         guard isRecording else { return }
-        print("🎥 Stopping recording")
         videoOutput?.stopRecording()
         isRecording = false
     }
@@ -319,33 +204,21 @@ class CameraManager: NSObject, ObservableObject {
 
 extension CameraManager: AVCaptureFileOutputRecordingDelegate {
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        if let error = error {
-            print("⚠️ Recording error: \(error.localizedDescription)")
-            return
-        }
-        
-        // Only request photo library access when we need to save
-        checkPhotoLibraryPermission { granted in
-            if granted {
-                PHPhotoLibrary.shared().performChanges {
-                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: outputFileURL)
-                } completionHandler: { success, error in
+        if error == nil {
+            // Save to Photos library
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: outputFileURL)
+            } completionHandler: { success, error in
+                if success {
                     DispatchQueue.main.async {
-                        if success {
-                            print("🎥 Video saved to Photos library")
-                            self.recordedVideoURL = outputFileURL
-                        } else if let error = error {
-                            print("⚠️ Error saving to Photos: \(error.localizedDescription)")
-                        }
+                        self.recordedVideoURL = outputFileURL
                     }
-                }
-            } else {
-                print("⚠️ Cannot save video: no photo library access")
-                // Still set the URL so we can preview the video
-                DispatchQueue.main.async {
-                    self.recordedVideoURL = outputFileURL
+                } else if let error = error {
+                    print("Error saving to Photos: \(error.localizedDescription)")
                 }
             }
+        } else {
+            print("Error recording video: \(error?.localizedDescription ?? "unknown error")")
         }
     }
 }
