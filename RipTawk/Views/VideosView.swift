@@ -14,13 +14,37 @@ import UIKit
 struct VideosView: View {
     @StateObject private var projectManager = ProjectManager()
     @State private var showMediaPicker = false
+    @State private var editingProject: VideoProject?
+    @State private var showTitleEdit = false
+    @State private var projectToDelete: VideoProject?
+    @State private var showDeleteConfirmation = false
+    
+    private let columns = [
+        GridItem(.flexible()),
+        GridItem(.flexible()),
+        GridItem(.flexible())
+    ]
     
     var body: some View {
         NavigationView {
-            List {
-                ForEach(projectManager.projects) { project in
-                    ProjectRowView(project: project)
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 16) {
+                    ForEach(projectManager.projects) { project in
+                        ProjectGridItem(project: project) {
+                            editingProject = project
+                            showTitleEdit = true
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                projectToDelete = project
+                                showDeleteConfirmation = true
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
                 }
+                .padding()
             }
             .navigationTitle("My Projects")
             .toolbar {
@@ -37,6 +61,37 @@ struct VideosView: View {
                     }
                 }
             }
+            .alert("Edit Title", isPresented: $showTitleEdit) {
+                if let project = editingProject {
+                    TextField("Title", text: .constant(project.title))
+                    Button("Save") {
+                        // TODO: Implement title update in Appwrite
+                        showTitleEdit = false
+                    }
+                    Button("Cancel", role: .cancel) {
+                        showTitleEdit = false
+                    }
+                }
+            }
+            .alert("Delete Project", isPresented: $showDeleteConfirmation) {
+                Button("Delete", role: .destructive) {
+                    if let project = projectToDelete {
+                        Task {
+                            do {
+                                try await AppwriteService.shared.deleteVideo(project)
+                                // Remove from local array
+                                projectManager.projects.removeAll { $0.id == project.id }
+                            } catch {
+                                print("❌ Error deleting project: \(error)")
+                                // TODO: Show error alert to user
+                            }
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Are you sure you want to delete this project? This action cannot be undone.")
+            }
             .task {
                 await projectManager.loadProjects()
             }
@@ -44,9 +99,20 @@ struct VideosView: View {
     }
 }
 
-struct ProjectRowView: View {
+struct ProjectGridItem: View {
     let project: VideoProject
+    let onTitleTap: () -> Void
+    @State private var thumbnail: UIImage?
     @State private var videoURL: URL?
+    @State private var isEditing = false
+    @State private var editedTitle: String
+    @StateObject private var projectManager = ProjectManager()
+    
+    init(project: VideoProject, onTitleTap: @escaping () -> Void) {
+        self.project = project
+        self.onTitleTap = onTitleTap
+        self._editedTitle = State(initialValue: project.title)
+    }
     
     var body: some View {
         NavigationLink {
@@ -63,7 +129,70 @@ struct ProjectRowView: View {
                     }
             }
         } label: {
-            VideoProjectRow(project: project)
+            VStack(alignment: .leading, spacing: 8) {
+                // Thumbnail
+                Group {
+                    if let thumbnail = thumbnail {
+                        Image(uiImage: thumbnail)
+                            .resizable()
+                            .aspectRatio(16/9, contentMode: .fill)
+                    } else {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .aspectRatio(16/9, contentMode: .fill)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .cornerRadius(8)
+                .clipped()
+                
+                // Title (tappable)
+                Button(action: onTitleTap) {
+                    Text(project.title)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                
+                // Date
+                Text(formatDate(project.createdAt))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .task {
+            do {
+                videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
+                generateThumbnail()
+            } catch {
+                print("❌ Error loading video URL: \(error)")
+            }
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+    
+    private func generateThumbnail() {
+        guard let videoURL = videoURL else { return }
+        let asset = AVURLAsset(url: videoURL)
+        let imageGenerator = AVAssetImageGenerator(asset: asset)
+        imageGenerator.appliesPreferredTrackTransform = true
+        
+        Task {
+            do {
+                let cgImage = try await imageGenerator.image(at: .zero).image
+                await MainActor.run {
+                    thumbnail = UIImage(cgImage: cgImage)
+                }
+            } catch {
+                print("❌ Error generating thumbnail: \(error)")
+            }
         }
     }
 }
@@ -113,6 +242,7 @@ struct MediaPickerView: View {
 @MainActor
 class ProjectManager: ObservableObject {
     @Published var projects: [VideoProject] = []
+    @Published var syncStatus: [String: Bool] = [:] // Track sync status for each project
     private let appwriteService = AppwriteService.shared
     
     func loadProjects() async {
@@ -128,83 +258,38 @@ class ProjectManager: ObservableObject {
         do {
             let asset = AVURLAsset(url: videoURL)
             let duration = try await asset.load(.duration).seconds
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateStyle = .medium
+            dateFormatter.timeStyle = .short
             
+            // Create a default title with date and time
+            let defaultTitle = "Project \(dateFormatter.string(from: Date()))"
+            
+            // Save to local storage first
+            let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let savedURL = documentsURL.appendingPathComponent("video_\(UUID().uuidString).mov")
+            
+            try FileManager.default.copyItem(at: videoURL, to: savedURL)
+            
+            // Create project in Appwrite
             let project = try await appwriteService.uploadVideo(
-                url: videoURL,
-                title: "Project \(projects.count + 1)",
+                url: savedURL,
+                title: defaultTitle,
                 duration: duration
             )
             
+            // Add to projects list
             projects.append(project)
             print("✅ Created new project with ID: \(project.id)")
+            
         } catch {
             print("❌ Error creating project: \(error)")
         }
     }
-}
-
-struct VideoProjectRow: View {
-    let project: VideoProject
-    @State private var thumbnail: UIImage?
-    @State private var videoURL: URL?
     
-    var body: some View {
-        HStack {
-            if let thumbnail = thumbnail {
-                Image(uiImage: thumbnail)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 80, height: 45)
-                    .cornerRadius(5)
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(width: 80, height: 45)
-                    .cornerRadius(5)
-            }
-            
-            VStack(alignment: .leading) {
-                Text(project.title)
-                    .font(.headline)
-                Text(formatDuration(project.duration))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .task {
-            do {
-                videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
-                generateThumbnail()
-            } catch {
-                print("❌ Error loading video URL: \(error)")
-            }
-        }
-    }
-    
-    func formatDuration(_ duration: TimeInterval) -> String {
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.minute, .second]
-        formatter.unitsStyle = .positional
-        formatter.zeroFormattingBehavior = .pad
-        return formatter.string(from: duration) ?? ""
-    }
-    
-    func generateThumbnail() {
-        guard let videoURL = videoURL else { return }
-        let asset = AVURLAsset(url: videoURL)
-        let imageGenerator = AVAssetImageGenerator(asset: asset)
-        imageGenerator.appliesPreferredTrackTransform = true
-        
-        Task {
-            do {
-                let cgImage = try await imageGenerator.image(at: .zero).image
-                await MainActor.run {
-                    thumbnail = UIImage(cgImage: cgImage)
-                }
-            } catch {
-                print("❌ Error generating thumbnail: \(error)")
-            }
-        }
+    func updateProjectTitle(_ project: VideoProject, newTitle: String) async {
+        // TODO: Implement Appwrite title update
+        print("📝 Updating project title to: \(newTitle)")
     }
 }
 

@@ -35,6 +35,10 @@ struct VideoPreviewView: View {
                     HStack(spacing: 40) {
                         Button(action: { 
                             print("🎥 [PREVIEW] User tapped Retake")
+                            // Clean up player
+                            player?.pause()
+                            player = nil
+                            // Dismiss all the way back
                             isPresented = false 
                         }) {
                             VStack {

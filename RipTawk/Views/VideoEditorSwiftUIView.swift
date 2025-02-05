@@ -6,6 +6,7 @@ struct VideoEditorSwiftUIView: View {
     @State private var editedVideoURL: URL?
     @State private var showConfirmation = false
     @AppStorage("selectedTab") private var selectedTab: Int = 0
+    @StateObject private var projectManager = ProjectManager()
     
     // The video being edited.
     let video: Video
@@ -36,11 +37,15 @@ struct VideoEditorSwiftUIView: View {
                         Button(action: {
                             print("🎬 [EDITOR] User confirmed edits")
                             if let url = editedVideoURL {
-                                print("🎬 [EDITOR] Ready to upload edited video from: \(url.path)")
+                                print("🎬 [EDITOR] Creating project with video from: \(url.path)")
+                                // Create project with the edited video
+                                Task {
+                                    await projectManager.createProject(with: url)
+                                    // Switch to Projects tab (index 3)
+                                    selectedTab = 3
+                                    dismiss()
+                                }
                             }
-                            // Switch to Projects tab (assuming it's index 1)
-                            selectedTab = 1
-                            dismiss()
                         }) {
                             Text("Confirm Edits")
                                 .font(.headline)

@@ -29,10 +29,10 @@ class AppwriteService {
     let databases: Databases
     
     // Constants
-    private let databaseId = "main"
-    private let videosCollectionId = "videos"
-    private let videoBucketId = "videos"
-    private var currentUserId: String = ""
+    private let databaseId = "67a2ea9400210dd0d73b"  // main
+    private let videosCollectionId = "67a2eaa90034a69780ef"  // videos
+    private let videoBucketId = "67a2eabd002ffabdf95f"  // videos
+    @AppStorage("currentUserId") private var currentUserId: String = ""
     
     private init() {
         // Initialize Client with proper session handling
@@ -64,6 +64,7 @@ class AppwriteService {
             print("👤 [SESSION] Account verified - ID: \(accountDetails.id), Email: \(accountDetails.email)")
         } catch {
             print("⚠️ [SESSION] No active session found: \(error.localizedDescription)")
+            currentUserId = ""
             throw error
         }
     }
@@ -123,18 +124,21 @@ class AppwriteService {
         print("📤 Starting video upload to Appwrite")
         
         guard !currentUserId.isEmpty else {
+            print("❌ [UPLOAD] Error: User not logged in")
             throw NSError(domain: "AppwriteService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
         }
         
         // 1. Upload video file to storage
+        print("📤 [UPLOAD] Uploading to bucket: \(videoBucketId)")
         let file = try await storage.createFile(
             bucketId: videoBucketId,
             fileId: ID.unique(),
             file: InputFile.fromPath(url.path)
         )
-        print("📤 Video file uploaded with ID: \(file.id)")
+        print("📤 [UPLOAD] Video file uploaded with ID: \(file.id)")
         
         // 2. Create video document in database
+        print("📤 [UPLOAD] Creating document in collection: \(videosCollectionId)")
         let document = try await databases.createDocument(
             databaseId: databaseId,
             collectionId: videosCollectionId,
@@ -147,7 +151,7 @@ class AppwriteService {
                 "userId": currentUserId
             ] as [String : Any]
         )
-        print("📤 Video document created with ID: \(document.id)")
+        print("📤 [UPLOAD] Video document created with ID: \(document.id)")
         
         // 3. Create and return VideoProject
         return VideoProject(
@@ -216,22 +220,41 @@ class AppwriteService {
         return url
     }
     
-    func deleteVideo(project: VideoProject) async throws {
-        print("🗑 Deleting video project: \(project.id)")
+    func deleteVideo(_ project: VideoProject) async throws {
+        print("🗑 [DELETE] Starting deletion for project: \(project.id)")
         
-        // Delete file from storage
-        try await storage.deleteFile(
-            bucketId: videoBucketId,
-            fileId: project.videoFileId
-        )
-        print("🗑 Deleted video file: \(project.videoFileId)")
+        guard !currentUserId.isEmpty else {
+            print("❌ [DELETE] Error: User not logged in")
+            throw NSError(domain: "AppwriteService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
+        }
         
-        // Delete document from database
-        try await databases.deleteDocument(
-            databaseId: databaseId,
-            collectionId: videosCollectionId,
-            documentId: project.id
-        )
-        print("🗑 Deleted video document: \(project.id)")
+        // Verify ownership
+        guard project.userId == currentUserId else {
+            print("❌ [DELETE] Error: User does not own this video")
+            throw NSError(domain: "AppwriteService", code: 403, userInfo: [NSLocalizedDescriptionKey: "You don't have permission to delete this video"])
+        }
+        
+        do {
+            // 1. Delete file from storage
+            print("🗑 [DELETE] Deleting file from storage: \(project.videoFileId)")
+            try await storage.deleteFile(
+                bucketId: videoBucketId,
+                fileId: project.videoFileId
+            )
+            print("✅ [DELETE] File deleted from storage")
+            
+            // 2. Delete document from database
+            print("🗑 [DELETE] Deleting document from collection: \(project.id)")
+            try await databases.deleteDocument(
+                databaseId: databaseId,
+                collectionId: videosCollectionId,
+                documentId: project.id
+            )
+            print("✅ [DELETE] Document deleted from collection")
+            
+        } catch {
+            print("❌ [DELETE] Error during deletion: \(error.localizedDescription)")
+            throw error
+        }
     }
 } 

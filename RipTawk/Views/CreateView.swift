@@ -13,51 +13,20 @@ struct CreateView: View {
     var body: some View {
         NavigationView {
             VStack {
-                if let url = recordedVideoURL {
+                Button {
+                    showCamera = true
+                } label: {
                     VStack {
-                        NavigationLink(destination: VideoEditorSwiftUIView(video: Video(url: url))) {
-                            VStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 50))
-                                    .foregroundColor(.green)
-                                Text("Continue to Editor")
-                                    .font(.headline)
-                            }
-                            .padding()
-                        }
-                        .task {
-                            // Automatically create a project when continuing to editor
-                            await projectManager.createProject(with: url)
-                        }
-                        
-                        Button(action: {
-                            print("🎥 User discarded recorded video")
-                            recordedVideoURL = nil
-                        }) {
-                            HStack {
-                                Image(systemName: "trash")
-                                Text("Discard Video")
-                            }
-                            .foregroundColor(.red)
-                            .padding()
-                        }
+                        Image(systemName: "video.fill")
+                            .font(.system(size: 50))
+                        Text("Record Video")
+                            .font(.headline)
                     }
-                } else {
-                    Button {
-                        showCamera = true
-                    } label: {
-                        VStack {
-                            Image(systemName: "video.fill")
-                                .font(.system(size: 50))
-                            Text("Record Video")
-                                .font(.headline)
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.blue)
-                        .cornerRadius(12)
-                        .padding()
-                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.blue)
+                    .cornerRadius(12)
+                    .padding()
                 }
             }
             .navigationTitle("Create")
@@ -67,14 +36,6 @@ struct CreateView: View {
                         .ignoresSafeArea()
                         .navigationBarHidden(true)
                 }
-            }
-        }
-        .onDisappear {
-            // Clean up when leaving the view
-            if let url = recordedVideoURL {
-                print("🎥 Cleaning up video file at: \(url.path)")
-                try? FileManager.default.removeItem(at: url)
-                recordedVideoURL = nil
             }
         }
     }
@@ -145,35 +106,18 @@ struct CameraRecordingView: View {
                 showPreview = true
             }
         }
-        .onChange(of: showPreview) { _, newValue in
-            print("🎥 [CAMERA] showPreview changed to: \(newValue)")
-        }
         .fullScreenCover(isPresented: $showPreview) {
-            Group {
-                if let url = previewURL {
-                    VideoPreviewView(videoURL: url, isPresented: $showPreview)
-                        .onAppear {
-                            print("🎥 [PREVIEW] View appeared with video: \(url.path)")
-                        }
-                        .onDisappear {
-                            print("🎥 [PREVIEW] Preview disappeared")
-                            recordedVideoURL = previewURL
-                            print("🎥 [PREVIEW] Set recordedVideoURL to: \(previewURL?.path ?? "nil")")
-                            if recordedVideoURL != nil {
-                                print("🎥 [PREVIEW] Closing camera view")
-                                isPresented = false
-                            }
-                        }
-                } else {
-                    Color.clear
-                        .onAppear {
-                            print("🎥 [PREVIEW] Fallback view appeared - no URL available")
-                        }
+            VideoPreviewView(videoURL: previewURL!, isPresented: $showPreview)
+                .onDisappear {
+                    if recordedVideoURL == nil {
+                        // If no video was selected (i.e., user hit retake), stay on camera
+                        print("🎥 [CAMERA] User chose to retake, staying on camera")
+                    } else {
+                        // If video was selected, close camera view
+                        print("🎥 [CAMERA] Video selected, closing camera")
+                        isPresented = false
+                    }
                 }
-            }
-            .onAppear {
-                print("🎥 [PREVIEW] FullScreenCover content appeared")
-            }
         }
     }
 }

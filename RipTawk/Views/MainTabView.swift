@@ -30,7 +30,7 @@ struct MainTabView: View {
                 }
                 .tag(2)
             
-            Text("Projects Coming Soon")
+            VideosView()
                 .tabItem {
                     Label("Projects", systemImage: "film")
                 }
