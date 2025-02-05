@@ -18,7 +18,10 @@ struct VideoPreviewView: View {
                 
                 VStack {
                     HStack {
-                        Button(action: { isPresented = false }) {
+                        Button(action: { 
+                            print("🎥 [PREVIEW] User tapped Dismiss")
+                            isPresented = false 
+                        }) {
                             Image(systemName: "xmark")
                                 .font(.title2)
                                 .foregroundColor(.white)
@@ -30,7 +33,10 @@ struct VideoPreviewView: View {
                     Spacer()
                     
                     HStack(spacing: 40) {
-                        Button(action: { isPresented = false }) {
+                        Button(action: { 
+                            print("🎥 [PREVIEW] User tapped Retake")
+                            isPresented = false 
+                        }) {
                             VStack {
                                 Image(systemName: "arrow.counterclockwise")
                                     .font(.title)
@@ -40,7 +46,10 @@ struct VideoPreviewView: View {
                             .foregroundColor(.white)
                         }
                         
-                        Button(action: { shouldNavigateToEditor = true }) {
+                        Button(action: { 
+                            print("🎥 [PREVIEW] User tapped Continue")
+                            shouldNavigateToEditor = true 
+                        }) {
                             VStack {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.title)
@@ -55,9 +64,16 @@ struct VideoPreviewView: View {
             }
             .navigationDestination(isPresented: $shouldNavigateToEditor) {
                 VideoEditorSwiftUIView(video: Video(url: videoURL))
+                    .onAppear {
+                        print("🎥 [PREVIEW] Navigating to editor")
+                        // Clean up player before navigating
+                        player?.pause()
+                        player = nil
+                    }
             }
         }
         .onAppear {
+            print("🎥 [PREVIEW] View appeared, setting up player for: \(videoURL.path)")
             player = AVPlayer(url: videoURL)
             player?.play()
             
@@ -67,13 +83,17 @@ struct VideoPreviewView: View {
                 object: player?.currentItem,
                 queue: .main
             ) { _ in
+                print("🎥 [PREVIEW] Video reached end, looping")
                 player?.seek(to: .zero)
                 player?.play()
             }
         }
         .onDisappear {
+            print("🎥 [PREVIEW] View disappeared, cleaning up player")
             player?.pause()
             player = nil
+            // Remove notification observer
+            NotificationCenter.default.removeObserver(self)
         }
     }
 } 

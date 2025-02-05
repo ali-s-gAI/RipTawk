@@ -94,7 +94,10 @@ struct CameraRecordingView: View {
             
             VStack {
                 HStack {
-                    Button(action: { isPresented = false }) {
+                    Button(action: { 
+                        print("🎥 [CAMERA] Closing camera view")
+                        isPresented = false 
+                    }) {
                         Image(systemName: "xmark")
                             .font(.title2)
                             .foregroundColor(.white)
@@ -108,8 +111,10 @@ struct CameraRecordingView: View {
                 // Record button
                 Button(action: {
                     if cameraManager.isRecording {
+                        print("🎥 [CAMERA] Stopping recording")
                         cameraManager.stopRecording()
                     } else {
+                        print("🎥 [CAMERA] Starting recording")
                         cameraManager.startRecording()
                     }
                 }) {
@@ -134,18 +139,40 @@ struct CameraRecordingView: View {
         }
         .onChange(of: cameraManager.recordedVideoURL) { _, url in
             if let url = url {
+                print("🎥 [CAMERA] Recording completed, URL: \(url.path)")
                 previewURL = url
+                print("🎥 [CAMERA] Setting showPreview to true")
                 showPreview = true
             }
         }
+        .onChange(of: showPreview) { _, newValue in
+            print("🎥 [CAMERA] showPreview changed to: \(newValue)")
+        }
         .fullScreenCover(isPresented: $showPreview) {
-            if let url = previewURL {
-                VideoPreviewView(videoURL: url, isPresented: $showPreview)
-                    .onDisappear {
-                        if recordedVideoURL != nil {
-                            isPresented = false
+            Group {
+                if let url = previewURL {
+                    VideoPreviewView(videoURL: url, isPresented: $showPreview)
+                        .onAppear {
+                            print("🎥 [PREVIEW] View appeared with video: \(url.path)")
                         }
-                    }
+                        .onDisappear {
+                            print("🎥 [PREVIEW] Preview disappeared")
+                            recordedVideoURL = previewURL
+                            print("🎥 [PREVIEW] Set recordedVideoURL to: \(previewURL?.path ?? "nil")")
+                            if recordedVideoURL != nil {
+                                print("🎥 [PREVIEW] Closing camera view")
+                                isPresented = false
+                            }
+                        }
+                } else {
+                    Color.clear
+                        .onAppear {
+                            print("🎥 [PREVIEW] Fallback view appeared - no URL available")
+                        }
+                }
+            }
+            .onAppear {
+                print("🎥 [PREVIEW] FullScreenCover content appeared")
             }
         }
     }
