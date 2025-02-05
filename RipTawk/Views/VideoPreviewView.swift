@@ -9,40 +9,37 @@ struct VideoPreviewView: View {
     @State private var shouldNavigateToEditor = false
     
     var body: some View {
-        ZStack {
-            if let player = player {
-                VideoPlayer(player: player)
-                    .ignoresSafeArea()
-            }
-            
-            VStack {
-                HStack {
-                    Button(action: { isPresented = false }) {
-                        Image(systemName: "xmark")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .padding()
-                    }
-                    Spacer()
+        NavigationStack {
+            ZStack {
+                if let player = player {
+                    VideoPlayer(player: player)
+                        .ignoresSafeArea()
                 }
                 
-                Spacer()
-                
-                HStack(spacing: 40) {
-                    Button(action: { isPresented = false }) {
-                        VStack {
-                            Image(systemName: "arrow.counterclockwise")
-                                .font(.title)
-                            Text("Retake")
-                                .font(.callout)
+                VStack {
+                    HStack {
+                        Button(action: { isPresented = false }) {
+                            Image(systemName: "xmark")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                                .padding()
                         }
-                        .foregroundColor(.white)
+                        Spacer()
                     }
                     
-                    NavigationLink(
-                        destination: VideoEditorSwiftUIView(video: Video(url: videoURL)),
-                        isActive: $shouldNavigateToEditor
-                    ) {
+                    Spacer()
+                    
+                    HStack(spacing: 40) {
+                        Button(action: { isPresented = false }) {
+                            VStack {
+                                Image(systemName: "arrow.counterclockwise")
+                                    .font(.title)
+                                Text("Retake")
+                                    .font(.callout)
+                            }
+                            .foregroundColor(.white)
+                        }
+                        
                         Button(action: { shouldNavigateToEditor = true }) {
                             VStack {
                                 Image(systemName: "checkmark.circle.fill")
@@ -53,8 +50,11 @@ struct VideoPreviewView: View {
                             .foregroundColor(.white)
                         }
                     }
+                    .padding(.bottom, 50)
                 }
-                .padding(.bottom, 50)
+            }
+            .navigationDestination(isPresented: $shouldNavigateToEditor) {
+                VideoEditorSwiftUIView(video: Video(url: videoURL))
             }
         }
         .onAppear {

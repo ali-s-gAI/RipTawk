@@ -106,23 +106,13 @@ struct ContentView: View {
     private func checkCurrentSession() {
         Task {
             do {
-                if let account = try? await AppwriteService.shared.account.get() {
-                    print("🔑 [SESSION CHECK] Found existing session for user: \(account.id)")
-                    // Delete the existing session
-                    print("🧹 [SESSION CHECK] Cleaning up existing session...")
-                    try? await AppwriteService.shared.account.deleteSessions()
-                    DispatchQueue.main.async {
-                        isAuthenticated = false
-                    }
-                } else {
-                    print("❌ [SESSION CHECK] No active session found")
-                    DispatchQueue.main.async {
-                        isAuthenticated = false
-                    }
+                try await AppwriteService.shared.initializeSession()
+                await MainActor.run {
+                    isAuthenticated = true
                 }
             } catch {
-                print("⚠️ [SESSION CHECK] Error: \(error.localizedDescription)")
-                DispatchQueue.main.async {
+                print("❌ [SESSION CHECK] No active session: \(error.localizedDescription)")
+                await MainActor.run {
                     isAuthenticated = false
                 }
             }
@@ -132,31 +122,18 @@ struct ContentView: View {
     private func login() {
         Task {
             do {
-                NSLog("🔄 [LOGIN] Attempting to log in...")
-                
-                if let sessions = try? await AppwriteService.shared.account.listSessions() {
-                    NSLog("📋 [LOGIN] Active sessions found: \(sessions.total)")
-                    for session in sessions.sessions {
-                        NSLog("   - Session ID: \(session.id), Provider: \(session.provider)")
-                    }
-                }
-                
-                // Delete all sessions first
-                print("🧹 [LOGIN] Cleaning up existing sessions...")
-                try? await AppwriteService.shared.account.deleteSessions()
-                
-                print("📝 [LOGIN] Creating new session...")
-                let session = try await AppwriteService.shared.account.createEmailPasswordSession(
+                print("🔄 [LOGIN] Attempting to log in...")
+                try await AppwriteService.shared.createSession(
                     email: email,
                     password: password
                 )
-                print("✅ [LOGIN] Success - created session for user: \(session.userId)")
-                DispatchQueue.main.async {
+                
+                await MainActor.run {
                     isAuthenticated = true
                 }
             } catch {
                 print("❌ [LOGIN] Error: \(error.localizedDescription)")
-                DispatchQueue.main.async {
+                await MainActor.run {
                     errorMessage = error.localizedDescription
                     showError = true
                 }
@@ -167,17 +144,26 @@ struct ContentView: View {
     private func signUp() {
         Task {
             do {
-                let user = try await AppwriteService.shared.account.create(
-                    userId: ID.unique(),
+                print("📝 [SIGNUP] Creating account...")
+                let user = try await AppwriteService.shared.createAccount(
                     email: email,
                     password: password,
                     name: name
                 )
-                print("User created successfully: \(user.id)")
-                // Automatically log in after successful signup
-                await login()
+                print("✅ [SIGNUP] Created account for: \(user.email)")
+                
+                // Now create a session
+                try await AppwriteService.shared.createSession(
+                    email: email,
+                    password: password
+                )
+                
+                await MainActor.run {
+                    isAuthenticated = true
+                }
             } catch {
-                DispatchQueue.main.async {
+                print("❌ [SIGNUP] Error: \(error.localizedDescription)")
+                await MainActor.run {
                     errorMessage = error.localizedDescription
                     showError = true
                 }

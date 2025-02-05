@@ -19,13 +19,7 @@ struct VideosView: View {
         NavigationView {
             List {
                 ForEach(projectManager.projects) { project in
-                    NavigationLink {
-                        if let videoURL = try? await AppwriteService.shared.getVideoURL(fileId: project.videoFileId) {
-                            VideoEditorSwiftUIView(video: Video(url: videoURL))
-                        }
-                    } label: {
-                        VideoProjectRow(project: project)
-                    }
+                    ProjectRowView(project: project)
                 }
             }
             .navigationTitle("My Projects")
@@ -46,6 +40,30 @@ struct VideosView: View {
             .task {
                 await projectManager.loadProjects()
             }
+        }
+    }
+}
+
+struct ProjectRowView: View {
+    let project: VideoProject
+    @State private var videoURL: URL?
+    
+    var body: some View {
+        NavigationLink {
+            if let url = videoURL {
+                VideoEditorSwiftUIView(video: Video(url: url))
+            } else {
+                ProgressView("Loading video...")
+                    .task {
+                        do {
+                            videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
+                        } catch {
+                            print("❌ Error loading video URL: \(error)")
+                        }
+                    }
+            }
+        } label: {
+            VideoProjectRow(project: project)
         }
     }
 }
@@ -109,7 +127,7 @@ class ProjectManager: ObservableObject {
     func createProject(with videoURL: URL) async {
         do {
             let asset = AVURLAsset(url: videoURL)
-            let duration = asset.duration.seconds
+            let duration = try await asset.load(.duration).seconds
             
             let project = try await appwriteService.uploadVideo(
                 url: videoURL,

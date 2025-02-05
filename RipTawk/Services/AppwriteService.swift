@@ -1,5 +1,6 @@
 import Foundation
 import Appwrite
+import JSONCodable
 
 struct VideoProject: Identifiable, Codable {
     let id: String            // Appwrite document ID
@@ -31,12 +32,16 @@ class AppwriteService {
     private let databaseId = "main"
     private let videosCollectionId = "videos"
     private let videoBucketId = "videos"
+    private var currentUserId: String = ""
     
     private init() {
-        // Initialize Client
+        // Initialize Client with proper session handling
         client = Client()
-            .setEndpoint("https://cloud.appwrite.io/v1") // Replace with your Appwrite endpoint if self-hosted
-            .setProject("riptawk")                       // Your project ID
+            .setEndpoint("https://cloud.appwrite.io/v1")
+            .setProject("riptawk")
+            .setSelfSigned(false)
+        
+        print("🔧 [INIT] Initialized Appwrite client with project: riptawk")
         
         // Initialize Services
         account = Account(client)
@@ -44,10 +49,82 @@ class AppwriteService {
         databases = Databases(client)
     }
     
+    // MARK: - Session Management
+    
+    func initializeSession() async throws {
+        print("🔄 [SESSION] Initializing session...")
+        do {
+            // Try to get the current session
+            let session = try await account.getSession(sessionId: "current")
+            currentUserId = session.userId
+            print("✅ [SESSION] Restored existing session - UserID: \(session.userId)")
+            
+            // Verify account access
+            let accountDetails = try await account.get()
+            print("👤 [SESSION] Account verified - ID: \(accountDetails.id), Email: \(accountDetails.email)")
+        } catch {
+            print("⚠️ [SESSION] No active session found: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    func createSession(email: String, password: String) async throws {
+        print("🔑 [SESSION] Creating new session...")
+        
+        // First, clean up any existing sessions
+        do {
+            try await account.deleteSessions()
+            print("🧹 [SESSION] Cleaned up existing sessions")
+        } catch {
+            print("⚠️ [SESSION] No existing sessions to clean up")
+        }
+        
+        // Create new session
+        let session = try await account.createEmailPasswordSession(
+            email: email,
+            password: password
+        )
+        currentUserId = session.userId
+        print("✅ [SESSION] Created new session - UserID: \(session.userId)")
+        
+        // Verify the session works
+        let accountDetails = try await account.get()
+        print("👤 [SESSION] Session verified - ID: \(accountDetails.id), Email: \(accountDetails.email)")
+    }
+    
+    func signOut() async {
+        print("🚪 [SESSION] Signing out...")
+        do {
+            try await account.deleteSessions()
+            currentUserId = ""
+            print("✅ [SESSION] Successfully signed out")
+        } catch {
+            print("❌ [SESSION] Error signing out: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - Account Management
+    
+    func createAccount(email: String, password: String, name: String) async throws -> User<[String: AnyCodable]> {
+        print("📝 [ACCOUNT] Creating new account...")
+        let user = try await self.account.create(
+            userId: ID.unique(),
+            email: email,
+            password: password,
+            name: name
+        )
+        print("✅ [ACCOUNT] Created account - Email: \(email), Name: \(name)")
+        return user
+    }
+    
     // MARK: - Video Management
     
     func uploadVideo(url: URL, title: String, duration: TimeInterval) async throws -> VideoProject {
         print("📤 Starting video upload to Appwrite")
+        
+        guard !currentUserId.isEmpty else {
+            throw NSError(domain: "AppwriteService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
+        }
         
         // 1. Upload video file to storage
         let file = try await storage.createFile(
@@ -67,8 +144,8 @@ class AppwriteService {
                 "videoFileId": file.id,
                 "duration": duration,
                 "createdAt": Date(),
-                "userId": account.currentUser?.id ?? ""
-            ]
+                "userId": currentUserId
+            ] as [String : Any]
         )
         print("📤 Video document created with ID: \(document.id)")
         
@@ -79,13 +156,13 @@ class AppwriteService {
             videoFileId: file.id,
             duration: duration,
             createdAt: Date(),
-            userId: account.currentUser?.id ?? ""
+            userId: currentUserId
         )
     }
     
     func listUserVideos() async throws -> [VideoProject] {
         print("📥 Fetching user videos from Appwrite")
-        guard let userId = account.currentUser?.id else {
+        guard !currentUserId.isEmpty else {
             throw NSError(domain: "AppwriteService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
         }
         
@@ -93,19 +170,28 @@ class AppwriteService {
             databaseId: databaseId,
             collectionId: videosCollectionId,
             queries: [
-                Query.equal("userId", userId),
+                Query.equal("userId", value: currentUserId),
                 Query.orderDesc("createdAt")
             ]
         )
         
         return try documents.documents.map { doc in
-            try VideoProject(
+            let data = doc.data
+            guard let title = data["title"]?.value as? String,
+                  let videoFileId = data["videoFileId"]?.value as? String,
+                  let duration = data["duration"]?.value as? TimeInterval,
+                  let createdAt = data["createdAt"]?.value as? Date,
+                  let userId = data["userId"]?.value as? String else {
+                throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid document data"])
+            }
+            
+            return VideoProject(
                 id: doc.id,
-                title: doc.data["title"] as! String,
-                videoFileId: doc.data["videoFileId"] as! String,
-                duration: doc.data["duration"] as! TimeInterval,
-                createdAt: doc.data["createdAt"] as! Date,
-                userId: doc.data["userId"] as! String
+                title: title,
+                videoFileId: videoFileId,
+                duration: duration,
+                createdAt: createdAt,
+                userId: userId
             )
         }
     }
@@ -117,10 +203,14 @@ class AppwriteService {
             fileId: fileId
         )
         
-        let url = try await storage.getFileView(
+        let urlString = try await storage.getFileView(
             bucketId: videoBucketId,
             fileId: fileId
-        )
+        ).description
+        
+        guard let url = URL(string: urlString) else {
+            throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid video URL"])
+        }
         
         print("📥 Got video URL: \(url.absoluteString)")
         return url
