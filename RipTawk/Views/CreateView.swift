@@ -7,7 +7,6 @@ import Photos
 struct CreateView: View {
     @State private var showCamera = false
     @State private var recordedVideoURL: URL?
-    @StateObject private var cameraManager = CameraManager()
     
     var body: some View {
         NavigationView {
@@ -64,6 +63,14 @@ struct CameraRecordingView: View {
         ZStack {
             CameraPreview(cameraManager: cameraManager)
                 .ignoresSafeArea()
+                .onAppear {
+                    print("🎥 Camera view appeared, initializing camera")
+                    cameraManager.setupCaptureSession()
+                }
+                .onDisappear {
+                    print("🎥 Camera view disappeared, stopping camera")
+                    cameraManager.stopCaptureSession()
+                }
             
             VStack {
                 if !showPreview {
@@ -237,7 +244,7 @@ class CameraManager: NSObject, ObservableObject {
     
     override init() {
         super.init()
-        setupCaptureSession()
+        print("🎥 CameraManager initialized")
     }
     
     private func checkPhotoLibraryPermission(completion: @escaping (Bool) -> Void) {
@@ -254,7 +261,7 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
     
-    private func setupCaptureSession() {
+    func setupCaptureSession() {
         print("🎥 Setting up camera session")
         guard let videoDevice = AVCaptureDevice.default(for: .video),
               let videoInput = try? AVCaptureDeviceInput(device: videoDevice),
@@ -280,6 +287,13 @@ class CameraManager: NSObject, ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.captureSession.startRunning()
             print("🎥 Camera session started")
+        }
+    }
+    
+    func stopCaptureSession() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.captureSession.stopRunning()
+            print("🎥 Camera session stopped")
         }
     }
     
