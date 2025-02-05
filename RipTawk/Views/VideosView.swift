@@ -106,7 +106,6 @@ struct ProjectGridItem: View {
     @State private var videoURL: URL?
     @State private var isEditing = false
     @State private var editedTitle: String
-    @StateObject private var projectManager = ProjectManager()
     
     init(project: VideoProject, onTitleTap: @escaping () -> Void) {
         self.project = project
@@ -117,7 +116,7 @@ struct ProjectGridItem: View {
     var body: some View {
         NavigationLink {
             if let url = videoURL {
-                VideoEditorSwiftUIView(video: Video(url: url), existingProject: project)
+                VideoEditorSwiftUIView(video: url, existingProject: project)
             } else {
                 ProgressView("Loading video...")
                     .task {
@@ -239,7 +238,7 @@ struct MediaPickerView: View {
             }
             .fullScreenCover(isPresented: $showEditor) {
                 if let url = selectedVideoURL {
-                    VideoEditorSwiftUIView(video: Video(url: url))
+                    VideoEditorSwiftUIView(video: url)
                         .onDisappear {
                             // Only upload if the editor was dismissed with confirmation
                             if let url = selectedVideoURL {

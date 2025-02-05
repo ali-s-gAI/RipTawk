@@ -208,6 +208,7 @@ class AppwriteService {
                 let createdAt: Date
                 if let dateString = data["createdAt"]?.value as? String {
                     let isoFormatter = ISO8601DateFormatter()
+                    isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
                     if let date = isoFormatter.date(from: dateString) {
                         createdAt = date
                     } else {

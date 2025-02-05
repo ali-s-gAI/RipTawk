@@ -72,7 +72,7 @@ struct VideoPreviewView: View {
                 }
             }
             .navigationDestination(isPresented: $shouldNavigateToEditor) {
-                VideoEditorSwiftUIView(video: Video(url: videoURL))
+                VideoEditorSwiftUIView(video: videoURL)
                     .onAppear {
                         print("🎥 [PREVIEW] Navigating to editor")
                         player?.pause()
