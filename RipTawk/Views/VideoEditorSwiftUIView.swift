@@ -1,6 +1,8 @@
 import SwiftUI
 import VideoEditorSDK
+import AVFoundation
 
+// Remove our custom Video struct since we'll use ImglyKit.Video directly
 struct VideoEditorSwiftUIView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editedVideoURL: URL?
@@ -11,15 +13,25 @@ struct VideoEditorSwiftUIView: View {
     @AppStorage("selectedTab") private var selectedTab: Int = 0
     @StateObject private var projectManager = ProjectManager()
     
-    // The video being edited.
-    let video: Video
-    // Optional project to update (if editing existing project)
+    // The video being edited - now using ImglyKit.Video
+    let video: ImglyKit.Video
     var existingProject: VideoProject?
+    
+    init(video url: URL, existingProject: VideoProject? = nil) {
+        self.video = ImglyKit.Video(url: url)
+        self.existingProject = existingProject
+    }
     
     private func cleanupOriginalVideo() {
         do {
-            try FileManager.default.removeItem(at: video.url)
-            print("🧹 [EDITOR] Cleaned up original video: \(video.url.path)")
+            // Cast AVAsset to AVURLAsset to get the URL
+            guard let urlAsset = video.asset as? AVURLAsset else {
+                print("⚠️ [EDITOR] Could not get URL from asset")
+                return
+            }
+            let originalURL = urlAsset.url
+            try FileManager.default.removeItem(at: originalURL)
+            print("🧹 [EDITOR] Cleaned up original video: \(originalURL.path)")
         } catch {
             print("⚠️ [EDITOR] Could not clean up original video: \(error)")
         }
