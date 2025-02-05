@@ -63,5 +63,8 @@ fastlane/test_output
 
 *.mdc
 
+# License file
+/license
+/LICENSE
 RipTawk/license
-RipTawk/license
+RipTawk/LICENSE

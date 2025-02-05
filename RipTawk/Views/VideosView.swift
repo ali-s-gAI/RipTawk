@@ -12,27 +12,23 @@ import VideoEditorSDK
 import UIKit
 
 struct VideosView: View {
+    @StateObject private var projectManager = ProjectManager()
     @State private var showMediaPicker = false
-    @State private var videos: [URL] = []  // Simple array of video URLs
     
     var body: some View {
         NavigationView {
             List {
-                ForEach(videos.indices, id: \.self) { index in
-                    let url = videos[index]
-                    NavigationLink(destination: VideoEditorSwiftUIView(video: Video(url: url))) {
-                        HStack {
-                            Image(systemName: "video.fill")
-                                .font(.title2)
-                                .foregroundColor(.blue)
-                            Text("Video \(index + 1)")
-                                .font(.headline)
+                ForEach(projectManager.projects) { project in
+                    NavigationLink {
+                        if let videoURL = try? await AppwriteService.shared.getVideoURL(fileId: project.videoFileId) {
+                            VideoEditorSwiftUIView(video: Video(url: videoURL))
                         }
-                        .padding(.vertical, 8)
+                    } label: {
+                        VideoProjectRow(project: project)
                     }
                 }
             }
-            .navigationTitle("My Videos")
+            .navigationTitle("My Projects")
             .toolbar {
                 Button(action: {
                     showMediaPicker = true
@@ -42,8 +38,13 @@ struct VideosView: View {
             }
             .sheet(isPresented: $showMediaPicker) {
                 MediaPickerView(isPresented: $showMediaPicker) { url in
-                    videos.append(url)
+                    Task {
+                        await projectManager.createProject(with: url)
+                    }
                 }
+            }
+            .task {
+                await projectManager.loadProjects()
             }
         }
     }
@@ -94,79 +95,40 @@ struct MediaPickerView: View {
 @MainActor
 class ProjectManager: ObservableObject {
     @Published var projects: [VideoProject] = []
-    private let userDefaults = UserDefaults.standard
-    private let projectsKey = "savedProjects"
+    private let appwriteService = AppwriteService.shared
     
-    func loadProjects() {
-        if let data = userDefaults.data(forKey: projectsKey),
-           let decoded = try? JSONDecoder().decode([VideoProject].self, from: data) {
-            projects = decoded
-        }
-    }
-    
-    func saveProjects() {
-        if let encoded = try? JSONEncoder().encode(projects) {
-            userDefaults.set(encoded, forKey: projectsKey)
+    func loadProjects() async {
+        do {
+            projects = try await appwriteService.listUserVideos()
+            print("📥 Loaded \(projects.count) projects from Appwrite")
+        } catch {
+            print("❌ Error loading projects: \(error)")
         }
     }
     
     func createProject(with videoURL: URL) async {
-        let asset = AVURLAsset(url: videoURL)
-        let duration = (try? await asset.load(.duration).seconds) ?? 0
-        
-        let project = VideoProject(
-            title: "Project \(projects.count + 1)",
-            videoURL: videoURL,
-            duration: duration,
-            createdAt: Date()
-        )
-        
-        projects.append(project)
-        saveProjects()
-    }
-}
-
-struct VideoProject: Codable {
-    var uuid: UUID
-    let title: String
-    let videoURL: URL
-    let duration: TimeInterval
-    let createdAt: Date
-    
-    init(title: String, videoURL: URL, duration: TimeInterval, createdAt: Date) {
-        self.id = UUID()
-        self.title = title
-        self.videoURL = videoURL
-        self.duration = duration
-        self.createdAt = createdAt
-    }
-    
-    private enum CodingKeys: String, CodingKey {
-        case id, title, videoURL, duration, createdAt
-    }
-    
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(title, forKey: .title)
-        try container.encode(videoURL, forKey: .videoURL)
-        try container.encode(duration, forKey: .duration)
-        try container.encode(createdAt, forKey: .createdAt)
-    }
-    
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        title = try container.decode(String.self, forKey: .title)
-        videoURL = try container.decode(URL.self, forKey: .videoURL)
-        duration = try container.decode(TimeInterval.self, forKey: .duration)
-        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        do {
+            let asset = AVURLAsset(url: videoURL)
+            let duration = asset.duration.seconds
+            
+            let project = try await appwriteService.uploadVideo(
+                url: videoURL,
+                title: "Project \(projects.count + 1)",
+                duration: duration
+            )
+            
+            projects.append(project)
+            print("✅ Created new project with ID: \(project.id)")
+        } catch {
+            print("❌ Error creating project: \(error)")
+        }
     }
 }
 
 struct VideoProjectRow: View {
     let project: VideoProject
     @State private var thumbnail: UIImage?
+    @State private var videoURL: URL?
     
     var body: some View {
         HStack {
@@ -191,8 +153,13 @@ struct VideoProjectRow: View {
                     .foregroundColor(.secondary)
             }
         }
-        .onAppear {
-            generateThumbnail()
+        .task {
+            do {
+                videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
+                generateThumbnail()
+            } catch {
+                print("❌ Error loading video URL: \(error)")
+            }
         }
     }
     
@@ -205,7 +172,8 @@ struct VideoProjectRow: View {
     }
     
     func generateThumbnail() {
-        let asset = AVURLAsset(url: project.videoURL)
+        guard let videoURL = videoURL else { return }
+        let asset = AVURLAsset(url: videoURL)
         let imageGenerator = AVAssetImageGenerator(asset: asset)
         imageGenerator.appliesPreferredTrackTransform = true
         
@@ -216,7 +184,7 @@ struct VideoProjectRow: View {
                     thumbnail = UIImage(cgImage: cgImage)
                 }
             } catch {
-                print("Error generating thumbnail: \(error)")
+                print("❌ Error generating thumbnail: \(error)")
             }
         }
     }

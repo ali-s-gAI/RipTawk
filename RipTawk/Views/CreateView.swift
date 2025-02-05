@@ -8,20 +8,39 @@ struct CreateView: View {
     @State private var showCamera = false
     @State private var recordedVideoURL: URL?
     @StateObject private var cameraManager = CameraManager()
+    @StateObject private var projectManager = ProjectManager()
     
     var body: some View {
         NavigationView {
             VStack {
                 if let url = recordedVideoURL {
-                    NavigationLink(destination: VideoEditorSwiftUIView(video: Video(url: url))) {
-                        VStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 50))
-                                .foregroundColor(.green)
-                            Text("Continue to Editor")
-                                .font(.headline)
+                    VStack {
+                        NavigationLink(destination: VideoEditorSwiftUIView(video: Video(url: url))) {
+                            VStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.green)
+                                Text("Continue to Editor")
+                                    .font(.headline)
+                            }
+                            .padding()
                         }
-                        .padding()
+                        .task {
+                            // Automatically create a project when continuing to editor
+                            await projectManager.createProject(with: url)
+                        }
+                        
+                        Button(action: {
+                            print("🎥 User discarded recorded video")
+                            recordedVideoURL = nil
+                        }) {
+                            HStack {
+                                Image(systemName: "trash")
+                                Text("Discard Video")
+                            }
+                            .foregroundColor(.red)
+                            .padding()
+                        }
                     }
                 } else {
                     Button {
@@ -48,6 +67,14 @@ struct CreateView: View {
                         .ignoresSafeArea()
                         .navigationBarHidden(true)
                 }
+            }
+        }
+        .onDisappear {
+            // Clean up when leaving the view
+            if let url = recordedVideoURL {
+                print("🎥 Cleaning up video file at: \(url.path)")
+                try? FileManager.default.removeItem(at: url)
+                recordedVideoURL = nil
             }
         }
     }
@@ -219,6 +246,100 @@ extension CameraManager: AVCaptureFileOutputRecordingDelegate {
             }
         } else {
             print("Error recording video: \(error?.localizedDescription ?? "unknown error")")
+        }
+    }
+}
+
+struct VideoPreviewOverlay: View {
+    let videoURL: URL
+    let onRetake: () -> Void
+    let onContinue: (URL) -> Void
+    
+    @State private var player: AVPlayer
+    @Environment(\.scenePhase) private var scenePhase
+    
+    init(videoURL: URL, onRetake: @escaping () -> Void, onContinue: @escaping (URL) -> Void) {
+        self.videoURL = videoURL
+        self.onRetake = onRetake
+        self.onContinue = onContinue
+        self._player = State(initialValue: AVPlayer(url: videoURL))
+    }
+    
+    var body: some View {
+        ZStack {
+            Color.black
+                .ignoresSafeArea()
+            
+            VideoPlayer(player: player)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Add some padding at the top for the safe area
+                Color.clear
+                    .frame(height: 50)
+                
+                // Button container with semi-transparent background
+                HStack {
+                    Button(action: onRetake) {
+                        HStack {
+                            Image(systemName: "arrow.counterclockwise")
+                            Text("Retake")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal)
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: { onContinue(videoURL) }) {
+                        HStack {
+                            Text("Continue")
+                            Image(systemName: "arrow.right")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal)
+                    }
+                }
+                .background(Color.black.opacity(0.5))
+                
+                Spacer()
+            }
+            .ignoresSafeArea()
+        }
+        .onAppear {
+            print("🎥 Starting video preview playback")
+            player.seek(to: .zero)
+            player.play()
+            
+            // Loop the preview
+            NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: player.currentItem,
+                queue: .main
+            ) { _ in
+                player.seek(to: .zero)
+                player.play()
+            }
+        }
+        .onDisappear {
+            print("🎥 Stopping video preview playback")
+            player.pause()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .active:
+                print("🎥 App became active, resuming playback")
+                player.play()
+            case .inactive, .background:
+                print("🎥 App became inactive/background, pausing playback")
+                player.pause()
+            @unknown default:
+                break
+            }
         }
     }
 }
