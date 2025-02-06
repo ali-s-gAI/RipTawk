@@ -5,6 +5,7 @@ struct VideoProjectEditorView: View {
     let project: VideoProject
     @State private var localVideoURL: URL?
     @State private var errorMessage: String?
+    @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         Group {
@@ -30,8 +31,15 @@ struct VideoProjectEditorView: View {
             }
         }
         .onDisappear {
-            // Release the video so that playback stops.
+            cleanupDownloadedVideo()
+        }
+    }
+    
+    private func cleanupDownloadedVideo() {
+        if let url = localVideoURL {
+            try? FileManager.default.removeItem(at: url)
             localVideoURL = nil
+            print("🧹 [PROJECT] Cleaned up downloaded video")
         }
     }
     
