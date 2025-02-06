@@ -242,17 +242,46 @@ class AppwriteService {
     
     func getVideoURL(fileId: String) async throws -> URL {
         print("📥 Getting video URL for file ID: \(fileId)")
+        
+        // First verify the file exists
         let file = try await storage.getFile(
             bucketId: videoBucketId,
             fileId: fileId
         )
         
-        // Construct the download URL using Appwrite's URL structure
+        // Get current session
+        let session = try await account.getSession(sessionId: "current")
+        
+        // Construct the download URL
         let urlString = "\(client.endPoint)/storage/buckets/\(videoBucketId)/files/\(fileId)/download"
         
-        guard let url = URL(string: urlString) else {
+        guard var urlComponents = URLComponents(string: urlString) else {
             throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid video URL"])
         }
+        
+        // Add the project header as a query parameter
+        urlComponents.queryItems = [
+            URLQueryItem(name: "project", value: "riptawk")  // Hardcode project ID since we can't get it from client
+        ]
+        
+        guard let url = urlComponents.url else {
+            throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid video URL"])
+        }
+        
+        // Create a URLRequest with the session cookie
+        var request = URLRequest(url: url)
+        request.addValue("a_session_\(session.id)", forHTTPHeaderField: "Cookie")
+        
+        // Configure URLSession to use cookies for all requests to this domain
+        let config = URLSessionConfiguration.default
+        config.httpCookieStorage?.setCookie(HTTPCookie(properties: [
+            .domain: URL(string: client.endPoint)?.host ?? "",
+            .path: "/",
+            .name: "a_session_\(session.id)",
+            .value: session.id,
+            .secure: "TRUE"
+        ])!)
+        URLSession.shared.configuration.httpCookieStorage = config.httpCookieStorage
         
         print("📥 Got video URL: \(url.absoluteString)")
         return url
@@ -352,6 +381,29 @@ class AppwriteService {
             duration: duration,
             createdAt: project.createdAt,
             userId: currentUserId
+        )
+    }
+    
+    func updateProjectTitle(_ project: VideoProject, newTitle: String) async throws -> VideoProject {
+        print("📝 [UPDATE] Updating project title to: \(newTitle)")
+        
+        let document = try await databases.updateDocument(
+            databaseId: databaseId,
+            collectionId: videosCollectionId,
+            documentId: project.id,
+            data: [
+                "title": newTitle
+            ]
+        )
+        
+        // Return updated project
+        return VideoProject(
+            id: project.id,
+            title: newTitle,
+            videoFileId: project.videoFileId,
+            duration: project.duration,
+            createdAt: project.createdAt,
+            userId: project.userId
         )
     }
 } 

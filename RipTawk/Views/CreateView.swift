@@ -46,13 +46,18 @@ struct CameraRecordingView: View {
     @Binding var isPresented: Bool
     @StateObject private var cameraManager = CameraManager()
     @State private var showPreview = false
+    @State private var timeElapsed: TimeInterval = 0
+    @State private var timer: Timer?
+    private let maxRecordingTime: TimeInterval = 60 // 1 minute
     
     var body: some View {
         ZStack {
             CameraPreview(cameraManager: cameraManager)
                 .ignoresSafeArea()
             
+            // Overlay controls
             VStack {
+                // Top bar with close and flip camera buttons
                 HStack {
                     Button(action: { 
                         print("🎥 [CAMERA] Closing camera view")
@@ -62,10 +67,38 @@ struct CameraRecordingView: View {
                         Image(systemName: "xmark")
                             .font(.title2)
                             .foregroundColor(.white)
-                            .padding()
+                            .padding(12)
+                            .background(Color.black.opacity(0.5))
+                            .clipShape(Circle())
                     }
+                    .padding()
+                    
                     Spacer()
+                    
+                    // Timer display
+                    Text(timeString(from: timeElapsed))
+                        .font(.title3)
+                        .foregroundColor(.white)
+                        .padding(8)
+                        .background(Color.black.opacity(0.5))
+                        .cornerRadius(8)
+                    
+                    Spacer()
+                    
+                    // Flip camera button
+                    Button(action: {
+                        cameraManager.switchCamera()
+                    }) {
+                        Image(systemName: "camera.rotate")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .padding(12)
+                            .background(Color.black.opacity(0.5))
+                            .clipShape(Circle())
+                    }
+                    .padding()
                 }
+                .padding(.top, 60)
                 
                 Spacer()
                 
@@ -73,10 +106,10 @@ struct CameraRecordingView: View {
                 Button(action: {
                     if cameraManager.isRecording {
                         print("🎥 [CAMERA] Stopping recording")
-                        cameraManager.stopRecording()
+                        stopRecording()
                     } else {
                         print("🎥 [CAMERA] Starting recording")
-                        cameraManager.startRecording()
+                        startRecording()
                     }
                 }) {
                     ZStack {
@@ -95,6 +128,7 @@ struct CameraRecordingView: View {
                         }
                     }
                 }
+                .disabled(timeElapsed >= maxRecordingTime)
                 .padding(.bottom, 60)
             }
         }
@@ -104,6 +138,7 @@ struct CameraRecordingView: View {
         }
         .onDisappear {
             print("🎥 [CAMERA] View disappeared, stopping capture session")
+            stopRecording()
             cameraManager.stopCaptureSession()
         }
         .onChange(of: cameraManager.recordedVideoURL) { _, url in
@@ -124,6 +159,7 @@ struct CameraRecordingView: View {
                             // If no video was selected (i.e., user hit retake), stay on camera
                             print("🎥 [CAMERA] User chose to retake, staying on camera")
                             cameraManager.endPreview()
+                            resetTimer()
                         } else {
                             // If video was selected, close camera view
                             print("🎥 [CAMERA] Video selected, closing camera")
@@ -131,7 +167,6 @@ struct CameraRecordingView: View {
                         }
                     }
             } else {
-                // Fallback if URL is nil - should never happen but better than crashing
                 Text("Error loading video preview")
                     .onAppear {
                         print("❌ [CAMERA] Error: recordedVideoURL was nil when trying to show preview")
@@ -140,6 +175,44 @@ struct CameraRecordingView: View {
                     }
             }
         }
+    }
+    
+    private func startRecording() {
+        cameraManager.startRecording()
+        startTimer()
+    }
+    
+    private func stopRecording() {
+        cameraManager.stopRecording()
+        stopTimer()
+    }
+    
+    private func startTimer() {
+        resetTimer()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            if timeElapsed < maxRecordingTime {
+                timeElapsed += 0.1
+            } else {
+                stopRecording()
+            }
+        }
+    }
+    
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+    
+    private func resetTimer() {
+        stopTimer()
+        timeElapsed = 0
+    }
+    
+    private func timeString(from timeInterval: TimeInterval) -> String {
+        let minutes = Int(timeInterval) / 60
+        let seconds = Int(timeInterval) % 60
+        let tenths = Int((timeInterval * 10).truncatingRemainder(dividingBy: 10))
+        return String(format: "%d:%02d.%d", minutes, seconds, tenths)
     }
 }
 
@@ -167,6 +240,7 @@ class CameraManager: NSObject, ObservableObject {
     var videoOutput: AVCaptureMovieFileOutput?
     private var tempVideoURL: URL? // Track the temporary URL
     private var isPreviewingVideo = false // Track if video is being previewed
+    private var audioInput: AVCaptureDeviceInput?
     
     override init() {
         super.init()
@@ -218,13 +292,15 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     private func setupCaptureSession() {
-        guard let videoDevice = AVCaptureDevice.default(for: .video),
+        guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
               let videoInput = try? AVCaptureDeviceInput(device: videoDevice),
               let audioDevice = AVCaptureDevice.default(for: .audio),
               let audioInput = try? AVCaptureDeviceInput(device: audioDevice) else {
             print("❌ [CAMERA] Failed to setup capture devices")
             return
         }
+        
+        self.audioInput = audioInput
         
         if captureSession.canAddInput(videoInput) && captureSession.canAddInput(audioInput) {
             captureSession.addInput(videoInput)
@@ -279,6 +355,42 @@ class CameraManager: NSObject, ObservableObject {
         isPreviewingVideo = false
         cleanup()
     }
+    
+    func switchCamera() {
+        guard !isRecording else { return }
+        
+        captureSession.beginConfiguration()
+        
+        // Remove video input
+        if let currentVideoInput = captureSession.inputs.first(where: { input in
+            guard let input = input as? AVCaptureDeviceInput else { return false }
+            return input.device.hasMediaType(.video)
+        }) {
+            captureSession.removeInput(currentVideoInput)
+        }
+        
+        // Get current position and switch to opposite
+        let currentPosition = (captureSession.inputs.first { input in
+            guard let input = input as? AVCaptureDeviceInput else { return false }
+            return input.device.hasMediaType(.video)
+        } as? AVCaptureDeviceInput)?.device.position ?? .back
+        
+        let preferredPosition: AVCaptureDevice.Position = currentPosition == .front ? .back : .front
+        
+        guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: preferredPosition),
+              let videoInput = try? AVCaptureDeviceInput(device: videoDevice) else {
+            print("❌ [CAMERA] Failed to switch camera")
+            captureSession.commitConfiguration()
+            return
+        }
+        
+        if captureSession.canAddInput(videoInput) {
+            captureSession.addInput(videoInput)
+            print("✅ [CAMERA] Switched to \(preferredPosition == .front ? "front" : "back") camera")
+        }
+        
+        captureSession.commitConfiguration()
+    }
 }
 
 extension CameraManager: AVCaptureFileOutputRecordingDelegate {
@@ -288,24 +400,9 @@ extension CameraManager: AVCaptureFileOutputRecordingDelegate {
             return
         }
         
-        // Start preview mode before setting the URL
+        // Start preview mode and set URL without saving to Photos library yet
         startPreview()
-        
-        // Save to Photos library
-        PHPhotoLibrary.shared().performChanges {
-            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: outputFileURL)
-        } completionHandler: { [weak self] success, error in
-            DispatchQueue.main.async {
-                if success {
-                    print("✅ [CAMERA] Video saved to Photos library")
-                    self?.recordedVideoURL = outputFileURL
-                } else if let error = error {
-                    print("❌ [CAMERA] Error saving to Photos: \(error.localizedDescription)")
-                    // If there's an error, end preview mode and clean up
-                    self?.endPreview()
-                }
-            }
-        }
+        recordedVideoURL = outputFileURL
     }
     
     func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {

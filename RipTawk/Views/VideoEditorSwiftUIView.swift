@@ -87,6 +87,9 @@ struct VideoEditorSwiftUIView: View {
                                             dismiss()
                                             // Give time for the tab switch before dismissing
                                             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                                            
+                                            // Refresh projects list
+                                            await projectManager.loadProjects()
                                         } catch {
                                             print("❌ [EDITOR] Upload error: \(error)")
                                             errorMessage = error.localizedDescription

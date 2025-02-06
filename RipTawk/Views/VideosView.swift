@@ -330,8 +330,15 @@ class ProjectManager: ObservableObject {
     }
     
     func updateProjectTitle(_ project: VideoProject, newTitle: String) async {
-        // TODO: Implement Appwrite title update
-        print("📝 Updating project title to: \(newTitle)")
+        do {
+            let updatedProject = try await appwriteService.updateProjectTitle(project, newTitle: newTitle)
+            if let index = projects.firstIndex(where: { $0.id == project.id }) {
+                projects[index] = updatedProject
+            }
+            print("✅ Updated project title: \(project.id)")
+        } catch {
+            print("❌ Error updating project title: \(error)")
+        }
     }
 }
 
