@@ -9,9 +9,10 @@ struct CreateView: View {
     @State private var recordedVideoURL: URL?
     @StateObject private var cameraManager = CameraManager()
     @StateObject private var projectManager = ProjectManager()
+    @State private var navigateToEditor = false
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack {
                 Button {
                     showCamera = true
@@ -30,12 +31,20 @@ struct CreateView: View {
                 }
             }
             .navigationTitle("Create")
-            .fullScreenCover(isPresented: $showCamera) {
-                NavigationView {
-                    CameraRecordingView(recordedVideoURL: $recordedVideoURL, isPresented: $showCamera)
-                        .ignoresSafeArea()
-                        .navigationBarHidden(true)
+            .navigationDestination(isPresented: $navigateToEditor) {
+                if let url = recordedVideoURL {
+                    VideoEditorSwiftUIView(video: url)
                 }
+            }
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraRecordingView(recordedVideoURL: $recordedVideoURL, isPresented: $showCamera)
+                    .ignoresSafeArea()
+                    .onChange(of: recordedVideoURL) { _, url in
+                        if url != nil {
+                            showCamera = false
+                            navigateToEditor = true
+                        }
+                    }11
             }
         }
     }
