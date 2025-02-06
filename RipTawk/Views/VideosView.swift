@@ -104,6 +104,7 @@ struct ProjectGridItem: View {
     let onTitleTap: () -> Void
     @State private var thumbnail: UIImage?
     @State private var editedTitle: String
+    @State private var showEditor = false
 
     init(project: VideoProject, onTitleTap: @escaping () -> Void) {
         self.project = project
@@ -112,8 +113,8 @@ struct ProjectGridItem: View {
     }
 
     var body: some View {
-        NavigationLink {
-            VideoEditorSwiftUIView(video: nil, existingProject: project)
+        Button {
+            showEditor = true
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 // Thumbnail
@@ -146,6 +147,22 @@ struct ProjectGridItem: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+        }
+        .fullScreenCover(isPresented: $showEditor) {
+            VideoEditorSwiftUIView(video: nil, existingProject: project)
+                .overlay(alignment: .topLeading) {
+                    Button {
+                        showEditor = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .padding(12)
+                            .background(Color.black.opacity(0.5))
+                            .clipShape(Circle())
+                            .padding()
+                    }
+                }
         }
         .onAppear {
             if let cached = ThumbnailCache.shared.getImage(for: project.videoFileId) {
