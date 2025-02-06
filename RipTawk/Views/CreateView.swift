@@ -44,7 +44,7 @@ struct CreateView: View {
                             showCamera = false
                             navigateToEditor = true
                         }
-                    }11
+                    }
             }
         }
     }

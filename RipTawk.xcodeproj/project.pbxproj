@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		35566F552D51B3B900682139 /* Appwrite in Frameworks */ = {isa = PBXBuildFile; productRef = 35566F542D51B3B900682139 /* Appwrite */; };
 		359350022D52AF2A00374E2F /* VideoEditorSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 359350012D52AF2A00374E2F /* VideoEditorSDK */; };
+		35EB9D8E2D5532F900613B9C /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35EB9D8B2D5532F900613B9C /* ThumbnailCache.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,6 +34,7 @@
 		35566F162D516C4200682139 /* RipTawkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RipTawkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		35566F202D516C4200682139 /* RipTawkUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RipTawkUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		359350052D52B24200374E2F /* license */ = {isa = PBXFileReference; lastKnownFileType = text; name = license; path = RipTawk/license; sourceTree = "<group>"; };
+		35EB9D8B2D5532F900613B9C /* ThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCache.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -102,6 +104,7 @@
 				35566F232D516C4200682139 /* RipTawkUITests */,
 				35934FCB2D52784300374E2F /* Frameworks */,
 				35566F072D516C4000682139 /* Products */,
+				35EB9D8D2D5532F900613B9C /* Core */,
 			);
 			sourceTree = "<group>";
 		};
@@ -120,6 +123,22 @@
 			children = (
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		35EB9D8C2D5532F900613B9C /* Cache */ = {
+			isa = PBXGroup;
+			children = (
+				35EB9D8B2D5532F900613B9C /* ThumbnailCache.swift */,
+			);
+			path = Cache;
+			sourceTree = "<group>";
+		};
+		35EB9D8D2D5532F900613B9C /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				35EB9D8C2D5532F900613B9C /* Cache */,
+			);
+			path = Core;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -272,6 +291,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				35EB9D8E2D5532F900613B9C /* ThumbnailCache.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

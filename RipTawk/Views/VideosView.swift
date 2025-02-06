@@ -104,7 +104,6 @@ struct ProjectGridItem: View {
     let onTitleTap: () -> Void
     @State private var thumbnail: UIImage?
     @State private var videoURL: URL?
-    @State private var isEditing = false
     @State private var editedTitle: String
     
     init(project: VideoProject, onTitleTap: @escaping () -> Void) {
@@ -119,13 +118,6 @@ struct ProjectGridItem: View {
                 VideoEditorSwiftUIView(video: url, existingProject: project)
             } else {
                 ProgressView("Loading video...")
-                    .task {
-                        do {
-                            videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
-                        } catch {
-                            print("❌ Error loading video URL: \(error)")
-                        }
-                    }
             }
         } label: {
             VStack(alignment: .leading, spacing: 8) {
@@ -160,12 +152,14 @@ struct ProjectGridItem: View {
                     .foregroundColor(.secondary)
             }
         }
-        .task {
-            do {
-                videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
-                generateThumbnail()
-            } catch {
-                print("❌ Error loading video URL: \(error)")
+        .task {  // Load video URL and thumbnail only once when the view appears
+            if videoURL == nil {
+                do {
+                    videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
+                    await generateThumbnail()
+                } catch {
+                    print("❌ Error loading video URL: \(error)")
+                }
             }
         }
     }
@@ -177,21 +171,25 @@ struct ProjectGridItem: View {
         return formatter.string(from: date)
     }
     
-    private func generateThumbnail() {
+    private func generateThumbnail() async {
         guard let videoURL = videoURL else { return }
+        // Check if the thumbnail is cached
+        if let cachedImage = ThumbnailCache.shared.getImage(for: project.videoFileId) {
+            await MainActor.run { thumbnail = cachedImage }
+            return
+        }
+        
         let asset = AVURLAsset(url: videoURL)
         let imageGenerator = AVAssetImageGenerator(asset: asset)
         imageGenerator.appliesPreferredTrackTransform = true
         
-        Task {
-            do {
-                let cgImage = try await imageGenerator.image(at: .zero).image
-                await MainActor.run {
-                    thumbnail = UIImage(cgImage: cgImage)
-                }
-            } catch {
-                print("❌ Error generating thumbnail: \(error)")
-            }
+        do {
+            let cgImage = try await imageGenerator.image(at: .zero).image
+            let image = UIImage(cgImage: cgImage)
+            await MainActor.run { thumbnail = image }
+            ThumbnailCache.shared.setImage(image, for: project.videoFileId)
+        } catch {
+            print("❌ Error generating thumbnail: \(error)")
         }
     }
 }

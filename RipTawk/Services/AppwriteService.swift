@@ -35,6 +35,9 @@ class AppwriteService {
     private let videoBucketId = "67a2eabd002ffabdf95f"  // videos
     @AppStorage("currentUserId") private var currentUserId: String = ""
     
+    // Add a cache for video URLs
+    private var videoURLCache: [String: URL] = [:]
+    
     private init() {
         // Initialize Client with proper session handling
         client = Client()
@@ -241,38 +244,36 @@ class AppwriteService {
     }
     
     func getVideoURL(fileId: String) async throws -> URL {
+        // Check in-memory cache first
+        if let cachedURL = videoURLCache[fileId] {
+            return cachedURL
+        }
+        
         print("📥 Getting video URL for file ID: \(fileId)")
         
-        // First verify the file exists
         let file = try await storage.getFile(
             bucketId: videoBucketId,
             fileId: fileId
         )
         
-        // Get current session
         let session = try await account.getSession(sessionId: "current")
         
-        // Construct the download URL
         let urlString = "\(client.endPoint)/storage/buckets/\(videoBucketId)/files/\(fileId)/download"
-        
         guard var urlComponents = URLComponents(string: urlString) else {
             throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid video URL"])
         }
         
-        // Add the project header as a query parameter
         urlComponents.queryItems = [
-            URLQueryItem(name: "project", value: "riptawk")  // Hardcode project ID since we can't get it from client
+            URLQueryItem(name: "project", value: "riptawk")
         ]
         
         guard let url = urlComponents.url else {
             throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid video URL"])
         }
         
-        // Create a URLRequest with the session cookie
         var request = URLRequest(url: url)
         request.addValue("a_session_\(session.id)", forHTTPHeaderField: "Cookie")
         
-        // Configure URLSession to use cookies for all requests to this domain
         let config = URLSessionConfiguration.default
         config.httpCookieStorage?.setCookie(HTTPCookie(properties: [
             .domain: URL(string: client.endPoint)?.host ?? "",
@@ -284,6 +285,9 @@ class AppwriteService {
         URLSession.shared.configuration.httpCookieStorage = config.httpCookieStorage
         
         print("📥 Got video URL: \(url.absoluteString)")
+        
+        // Cache the URL before returning
+        videoURLCache[fileId] = url
         return url
     }
     
