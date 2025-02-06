@@ -116,44 +116,96 @@ struct VideoEditorSwiftUIView: View {
     @State private var showConfirmation = false
     @State private var isUploading = false
     @State private var showError = false
-    @State private var errorMessage = ""
+    @State private var errorMessage: String? = nil
+    @State private var localVideoURL: URL?
+    @State private var isLoading = false
     @AppStorage("selectedTab") private var selectedTab: Int = 0
     @StateObject private var projectManager = ProjectManager()
     
-    let video: URL
-    var existingProject: VideoProject?
+    let video: URL?
+    let existingProject: VideoProject?
     
-    init(video url: URL, existingProject: VideoProject? = nil) {
+    init(video url: URL?, existingProject: VideoProject? = nil) {
         self.video = url
         self.existingProject = existingProject
-        setupCustomIcons() // Setup custom icons when initializing
+        print("🎬 [EDITOR] Initializing with video: \(url?.absoluteString ?? "nil"), project: \(existingProject?.id ?? "nil")")
     }
     
     var body: some View {
-        VideoEditor(video: ImglyKit.Video(url: video))
-            .onDidSave { result in
-                print("🎬 [EDITOR] Received edited video at \(result.output.url.absoluteString)")
-                editedVideoURL = result.output.url
-                showConfirmation = true
+        Group {
+            if let videoURL = localVideoURL ?? video {
+                VideoEditorWrapper(
+                    video: videoURL,
+                    onSave: { result in
+                        print("🎬 [EDITOR] Received edited video at \(result.output.url.absoluteString)")
+                        editedVideoURL = result.output.url
+                        showConfirmation = true
+                    },
+                    onCancel: {
+                        print("🎬 [EDITOR] User cancelled editing")
+                        cleanupAndDismiss()
+                    },
+                    onError: { error in
+                        print("🎬 [EDITOR] Error: \(error.localizedDescription)")
+                        errorMessage = error.localizedDescription
+                        showError = true
+                    }
+                )
+                .ignoresSafeArea()
+                .onAppear {
+                    print("🎬 [EDITOR] Showing editor with video URL: \(videoURL.absoluteString)")
+                }
+            } else if isLoading {
+                ProgressView("Loading video...")
+                    .onAppear {
+                        print("🎬 [EDITOR] Showing loading state")
+                    }
+            } else if let error = errorMessage {
+                Text("Error: \(error)")
+                    .foregroundColor(.red)
+                    .padding()
+                    .onAppear {
+                        print("🎬 [EDITOR] Showing error: \(error)")
+                    }
+            } else {
+                Text("No video available")
+                    .foregroundColor(.secondary)
+                    .onAppear {
+                        print("🎬 [EDITOR] No video URL or error state - showing empty state")
+                    }
             }
-            .onDidCancel {
-                print("🎬 [EDITOR] User cancelled editing")
-                cleanupAndDismiss()
+        }
+        .navigationTitle(existingProject?.title ?? "Edit Video")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            print("🎬 [EDITOR] Task started")
+            // If we have an existing project but no video URL, download it
+            if let project = existingProject, video == nil {
+                print("🎬 [EDITOR] Downloading video for project: \(project.id)")
+                isLoading = true
+                do {
+                    let remoteURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
+                    print("🎬 [EDITOR] Got remote URL: \(remoteURL.absoluteString)")
+                    localVideoURL = try await downloadFile(from: remoteURL)
+                    print("🎬 [EDITOR] Downloaded to local URL: \(localVideoURL?.absoluteString ?? "nil")")
+                } catch {
+                    print("🎬 [EDITOR] Download error: \(error.localizedDescription)")
+                    errorMessage = error.localizedDescription
+                }
+                isLoading = false
             }
-            .onDidFail { error in
-                print("🎬 [EDITOR] Error: \(error.localizedDescription)")
-                errorMessage = error.localizedDescription
-                showError = true
-            }
-            .ignoresSafeArea()
-            .alert("Upload Error", isPresented: $showError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(errorMessage)
-            }
-            .sheet(isPresented: $showConfirmation) {
-                confirmationOverlay
-            }
+        }
+        .alert("Upload Error", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "Unknown error")
+        }
+        .sheet(isPresented: $showConfirmation) {
+            confirmationOverlay
+        }
+        .onDisappear {
+            cleanupDownloadedVideo()
+        }
     }
     
     private var confirmationOverlay: some View {
@@ -231,18 +283,44 @@ struct VideoEditorSwiftUIView: View {
     }
     
     private func cleanupAndDismiss() {
-        // Clean up the video file
         cleanupOriginalVideo()
-        // Dismiss the view
+        cleanupDownloadedVideo()
         dismiss()
     }
     
     private func cleanupOriginalVideo() {
-        do {
-            try FileManager.default.removeItem(at: video)
-            print("🧹 [EDITOR] Cleaned up original video: \(video.path)")
-        } catch {
-            print("⚠️ [EDITOR] Could not clean up original video: \(error)")
+        if let url = video {
+            try? FileManager.default.removeItem(at: url)
+            print("🧹 [EDITOR] Cleaned up original video: \(url.path)")
         }
+    }
+    
+    private func cleanupDownloadedVideo() {
+        if let url = localVideoURL {
+            try? FileManager.default.removeItem(at: url)
+            localVideoURL = nil
+            print("🧹 [EDITOR] Cleaned up downloaded video")
+        }
+    }
+    
+    /// Downloads the file from the given remote URL to a temporary local URL with a proper file extension.
+    private func downloadFile(from remoteURL: URL) async throws -> URL {
+        let (tempURL, response) = try await URLSession.shared.download(from: remoteURL)
+        let ext: String
+        if let httpResponse = response as? HTTPURLResponse,
+           let mimeType = httpResponse.mimeType {
+            if mimeType == "video/mp4" {
+                ext = "mp4"
+            } else if mimeType == "video/quicktime" {
+                ext = "mov"
+            } else {
+                ext = "mov"  // default fallback
+            }
+        } else {
+            ext = "mov"
+        }
+        let newURL = tempURL.deletingPathExtension().appendingPathExtension(ext)
+        try FileManager.default.moveItem(at: tempURL, to: newURL)
+        return newURL
     }
 } 

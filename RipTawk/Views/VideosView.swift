@@ -113,7 +113,7 @@ struct ProjectGridItem: View {
 
     var body: some View {
         NavigationLink {
-            VideoProjectEditorView(project: project)
+            VideoEditorSwiftUIView(video: nil, existingProject: project)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 // Thumbnail

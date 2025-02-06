@@ -9,7 +9,7 @@ struct CreateView: View {
     @State private var recordedVideoURL: URL?
     @StateObject private var cameraManager = CameraManager()
     @StateObject private var projectManager = ProjectManager()
-    @State private var navigateToEditor = false
+    @State private var showEditor = false
     
     var body: some View {
         NavigationStack {
@@ -31,9 +31,22 @@ struct CreateView: View {
                 }
             }
             .navigationTitle("Create")
-            .navigationDestination(isPresented: $navigateToEditor) {
+            .fullScreenCover(isPresented: $showEditor) {
                 if let url = recordedVideoURL {
                     VideoEditorSwiftUIView(video: url)
+                        .overlay(alignment: .topLeading) {
+                            Button {
+                                showEditor = false
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.title2)
+                                    .foregroundColor(.white)
+                                    .padding(12)
+                                    .background(Color.black.opacity(0.5))
+                                    .clipShape(Circle())
+                                    .padding()
+                            }
+                        }
                 }
             }
             .fullScreenCover(isPresented: $showCamera) {
@@ -42,7 +55,7 @@ struct CreateView: View {
                     .onChange(of: recordedVideoURL) { _, url in
                         if url != nil {
                             showCamera = false
-                            navigateToEditor = true
+                            showEditor = true
                         }
                     }
             }
@@ -250,6 +263,7 @@ class CameraManager: NSObject, ObservableObject {
     private var tempVideoURL: URL? // Track the temporary URL
     private var isPreviewingVideo = false // Track if video is being previewed
     private var audioInput: AVCaptureDeviceInput?
+    private var currentPosition: AVCaptureDevice.Position = .back // Track current camera position
     
     override init() {
         super.init()
@@ -301,7 +315,7 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     private func setupCaptureSession() {
-        guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+        guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: currentPosition),
               let videoInput = try? AVCaptureDeviceInput(device: videoDevice),
               let audioDevice = AVCaptureDevice.default(for: .audio),
               let audioInput = try? AVCaptureDeviceInput(device: audioDevice) else {
@@ -378,15 +392,10 @@ class CameraManager: NSObject, ObservableObject {
             captureSession.removeInput(currentVideoInput)
         }
         
-        // Get current position and switch to opposite
-        let currentPosition = (captureSession.inputs.first { input in
-            guard let input = input as? AVCaptureDeviceInput else { return false }
-            return input.device.hasMediaType(.video)
-        } as? AVCaptureDeviceInput)?.device.position ?? .back
+        // Switch position
+        currentPosition = currentPosition == .front ? .back : .front
         
-        let preferredPosition: AVCaptureDevice.Position = currentPosition == .front ? .back : .front
-        
-        guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: preferredPosition),
+        guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: currentPosition),
               let videoInput = try? AVCaptureDeviceInput(device: videoDevice) else {
             print("❌ [CAMERA] Failed to switch camera")
             captureSession.commitConfiguration()
@@ -395,7 +404,7 @@ class CameraManager: NSObject, ObservableObject {
         
         if captureSession.canAddInput(videoInput) {
             captureSession.addInput(videoInput)
-            print("✅ [CAMERA] Switched to \(preferredPosition == .front ? "front" : "back") camera")
+            print("✅ [CAMERA] Switched to \(currentPosition == .front ? "front" : "back") camera")
         }
         
         captureSession.commitConfiguration()
