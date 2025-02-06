@@ -103,22 +103,17 @@ struct ProjectGridItem: View {
     let project: VideoProject
     let onTitleTap: () -> Void
     @State private var thumbnail: UIImage?
-    @State private var videoURL: URL?
     @State private var editedTitle: String
-    
+
     init(project: VideoProject, onTitleTap: @escaping () -> Void) {
         self.project = project
         self.onTitleTap = onTitleTap
         self._editedTitle = State(initialValue: project.title)
     }
-    
+
     var body: some View {
         NavigationLink {
-            if let url = videoURL {
-                VideoEditorSwiftUIView(video: url, existingProject: project)
-            } else {
-                ProgressView("Loading video...")
-            }
+            VideoProjectEditorView(project: project)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 // Thumbnail
@@ -136,7 +131,7 @@ struct ProjectGridItem: View {
                 .frame(maxWidth: .infinity)
                 .cornerRadius(8)
                 .clipped()
-                
+
                 // Title (tappable)
                 Button(action: onTitleTap) {
                     Text(project.title)
@@ -145,25 +140,27 @@ struct ProjectGridItem: View {
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                
+
                 // Date
                 Text(formatDate(project.createdAt))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
         }
-        .task {  // Load video URL and thumbnail only once when the view appears
-            if videoURL == nil {
-                do {
-                    videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
-                    await generateThumbnail()
-                } catch {
-                    print("❌ Error loading video URL: \(error)")
+        .onAppear {
+            if let cached = ThumbnailCache.shared.getImage(for: project.videoFileId) {
+                thumbnail = cached
+            } else {
+                Task {
+                    if let image = await generateThumbnail() {
+                        thumbnail = image
+                        ThumbnailCache.shared.setImage(image, for: project.videoFileId)
+                    }
                 }
             }
         }
     }
-    
+
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -171,25 +168,44 @@ struct ProjectGridItem: View {
         return formatter.string(from: date)
     }
     
-    private func generateThumbnail() async {
-        guard let videoURL = videoURL else { return }
-        // Check if the thumbnail is cached
-        if let cachedImage = ThumbnailCache.shared.getImage(for: project.videoFileId) {
-            await MainActor.run { thumbnail = cachedImage }
-            return
-        }
-        
-        let asset = AVURLAsset(url: videoURL)
-        let imageGenerator = AVAssetImageGenerator(asset: asset)
-        imageGenerator.appliesPreferredTrackTransform = true
-        
+    private func generateThumbnail() async -> UIImage? {
         do {
-            let cgImage = try await imageGenerator.image(at: .zero).image
-            let image = UIImage(cgImage: cgImage)
-            await MainActor.run { thumbnail = image }
-            ThumbnailCache.shared.setImage(image, for: project.videoFileId)
+            let videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
+            let asset = AVAsset(url: videoURL)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            let time = CMTime(seconds: 1, preferredTimescale: 600)
+            let cgImage = try generator.copyCGImage(at: time, actualTime: nil)
+            return UIImage(cgImage: cgImage)
         } catch {
-            print("❌ Error generating thumbnail: \(error)")
+            print("Thumbnail generation error: \(error)")
+            return nil
+        }
+    }
+}
+
+struct VideoDetailView: View {
+    let project: VideoProject
+    @State private var videoURL: URL?
+
+    var body: some View {
+        VStack {
+            if let url = videoURL {
+                VideoPlayer(player: AVPlayer(url: url))
+                    .navigationTitle(project.title)
+                    .navigationBarTitleDisplayMode(.inline)
+            } else {
+                ProgressView("Loading video...")
+                    .navigationTitle(project.title)
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .task {
+            do {
+                videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
+            } catch {
+                print("❌ Error loading video URL for project \(project.id): \(error)")
+            }
         }
     }
 }

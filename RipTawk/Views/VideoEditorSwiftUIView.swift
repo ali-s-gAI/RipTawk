@@ -14,18 +14,18 @@ struct VideoEditorSwiftUIView: View {
     @StateObject private var projectManager = ProjectManager()
     
     // The video being edited
-    let videoURL: URL
+    let video: URL
     var existingProject: VideoProject?
     
     init(video url: URL, existingProject: VideoProject? = nil) {
-        self.videoURL = url
+        self.video = url
         self.existingProject = existingProject
     }
     
     private func cleanupOriginalVideo() {
         do {
-            try FileManager.default.removeItem(at: videoURL)
-            print("🧹 [EDITOR] Cleaned up original video: \(videoURL.path)")
+            try FileManager.default.removeItem(at: video)
+            print("🧹 [EDITOR] Cleaned up original video: \(video.path)")
         } catch {
             print("⚠️ [EDITOR] Could not clean up original video: \(error)")
         }
@@ -34,7 +34,7 @@ struct VideoEditorSwiftUIView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                VideoEditor(video: ImglyKit.Video(url: videoURL))
+                VideoEditor(video: ImglyKit.Video(url: video))
                     .onDidSave { result in
                         // The user exported a new video successfully
                         print("🎬 [EDITOR] Received edited video at \(result.output.url.absoluteString)")
@@ -51,6 +51,9 @@ struct VideoEditorSwiftUIView: View {
                         showError = true
                     }
                     .ignoresSafeArea()
+                    .onDisappear {
+                        // Additional cleanup if needed
+                    }
                 
                 if showConfirmation {
                     VStack {
@@ -61,51 +64,65 @@ struct VideoEditorSwiftUIView: View {
                                 .background(Color(.systemBackground))
                                 .cornerRadius(12)
                         } else {
-                            Button(action: {
-                                print("🎬 [EDITOR] User confirmed edits")
-                                if let url = editedVideoURL {
-                                    print("🎬 [EDITOR] Creating/updating project with video from: \(url.path)")
-                                    isUploading = true
-                                    Task {
-                                        do {
-                                            if let project = existingProject {
-                                                // Update existing project
-                                                print("🎬 [EDITOR] Updating existing project: \(project.id)")
-                                                await projectManager.updateProject(project, with: url)
-                                            } else {
-                                                // Create new project
-                                                print("🎬 [EDITOR] Creating new project")
-                                                await projectManager.createProject(with: url)
+                            HStack {
+                                Button(action: {
+                                    print("🎬 [EDITOR] User confirmed edits")
+                                    if let url = editedVideoURL {
+                                        print("🎬 [EDITOR] Creating/updating project with video from: \(url.path)")
+                                        isUploading = true
+                                        Task {
+                                            do {
+                                                if let project = existingProject {
+                                                    // Update existing project
+                                                    print("🎬 [EDITOR] Updating existing project: \(project.id)")
+                                                    await projectManager.updateProject(project, with: url)
+                                                } else {
+                                                    // Create new project
+                                                    print("🎬 [EDITOR] Creating new project")
+                                                    await projectManager.createProject(with: url)
+                                                }
+                                                
+                                                // Clean up the original video after successful upload
+                                                cleanupOriginalVideo()
+                                                
+                                                // Switch to Projects tab (index 3) and dismiss all views
+                                                selectedTab = 3
+                                                // Dismiss all the way back to root
+                                                dismiss()
+                                                // Give time for the tab switch before dismissing
+                                                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                                                
+                                                // Refresh projects list
+                                                await projectManager.loadProjects()
+                                            } catch {
+                                                print("❌ [EDITOR] Upload error: \(error)")
+                                                errorMessage = error.localizedDescription
+                                                showError = true
+                                                isUploading = false
                                             }
-                                            
-                                            // Clean up the original video after successful upload
-                                            cleanupOriginalVideo()
-                                            
-                                            // Switch to Projects tab (index 3) and dismiss all views
-                                            selectedTab = 3
-                                            // Dismiss all the way back to root
-                                            dismiss()
-                                            // Give time for the tab switch before dismissing
-                                            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-                                            
-                                            // Refresh projects list
-                                            await projectManager.loadProjects()
-                                        } catch {
-                                            print("❌ [EDITOR] Upload error: \(error)")
-                                            errorMessage = error.localizedDescription
-                                            showError = true
-                                            isUploading = false
                                         }
                                     }
+                                }) {
+                                    Text(existingProject != nil ? "Save Changes" : "Confirm Edits")
+                                        .font(.headline)
+                                        .foregroundColor(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding()
+                                        .background(Color.blue)
+                                        .cornerRadius(12)
                                 }
-                            }) {
-                                Text(existingProject != nil ? "Save Changes" : "Confirm Edits")
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.blue)
-                                    .cornerRadius(12)
+                                Button(action: {
+                                    print("🎬 [EDITOR] User discarded edits")
+                                    dismiss()
+                                }) {
+                                    Text("Discard Changes")
+                                        .font(.headline)
+                                        .foregroundColor(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding()
+                                        .background(Color.red)
+                                        .cornerRadius(12)
+                                }
                             }
                             .padding()
                         }
@@ -118,6 +135,9 @@ struct VideoEditorSwiftUIView: View {
             } message: {
                 Text(errorMessage)
             }
+        }
+        .onDisappear {
+            print("🎬 [EDITOR] Editor disappearing, cleaning up if needed")
         }
     }
 } 
