@@ -331,6 +331,7 @@ class AppwriteService {
     
     func updateVideo(project: VideoProject, newVideoURL: URL, duration: TimeInterval) async throws -> VideoProject {
         print("📤 [UPDATE] Starting video update for project: \(project.id)")
+        print("📤 [UPDATE] Current videoFileId: \(project.videoFileId)")
         
         guard !currentUserId.isEmpty else {
             print("❌ [UPDATE] Error: User not logged in")
@@ -343,14 +344,7 @@ class AppwriteService {
             throw NSError(domain: "AppwriteService", code: 403, userInfo: [NSLocalizedDescriptionKey: "You don't have permission to update this video"])
         }
         
-        // 1. Delete old file from storage
-        print("🗑 [UPDATE] Deleting old file: \(project.videoFileId)")
-        try await storage.deleteFile(
-            bucketId: videoBucketId,
-            fileId: project.videoFileId
-        )
-        
-        // 2. Upload new file to storage
+        // 1. Upload new file to storage first
         print("📤 [UPDATE] Uploading new file to bucket: \(videoBucketId)")
         let file = try await storage.createFile(
             bucketId: videoBucketId,
@@ -359,26 +353,54 @@ class AppwriteService {
         )
         print("📤 [UPDATE] New video file uploaded with ID: \(file.id)")
         
-        // 3. Update document in database
-        print("📤 [UPDATE] Updating document in collection: \(videosCollectionId)")
+        // 2. Update document in database with new file ID
+        print("📤 [UPDATE] Updating document \(project.id) in collection: \(videosCollectionId)")
         let now = Date()
         let isoFormatter = ISO8601DateFormatter()
         let isoDate = isoFormatter.string(from: now)
+        
+        let updateData: [String: Any] = [
+            "videoFileID": file.id,  // Make sure this matches the field name in Appwrite
+            "duration": duration,
+            "updatedAt": isoDate
+        ]
+        print("📤 [UPDATE] Update data: \(updateData)")
         
         let document = try await databases.updateDocument(
             databaseId: databaseId,
             collectionId: videosCollectionId,
             documentId: project.id,
-            data: [
-                "videoFileID": file.id,
-                "duration": duration,
-                "updatedAt": isoDate
-            ] as [String : Any]
+            data: updateData
         )
-        print("📤 [UPDATE] Document updated with ID: \(document.id)")
+        print("📤 [UPDATE] Document updated. Response data: \(document.data)")
+        
+        // Verify the update
+        guard let updatedFileId = document.data["videoFileID"]?.value as? String else {
+            print("❌ [UPDATE] Failed to verify updated videoFileID in document")
+            throw NSError(domain: "AppwriteService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Failed to update video file ID"])
+        }
+        print("✅ [UPDATE] Verified new videoFileID in document: \(updatedFileId)")
+        
+        // 3. Delete old file from storage only after document is updated
+        print("🗑 [UPDATE] Deleting old file: \(project.videoFileId)")
+        do {
+            try await storage.deleteFile(
+                bucketId: videoBucketId,
+                fileId: project.videoFileId
+            )
+            print("✅ [UPDATE] Successfully deleted old file")
+        } catch {
+            print("⚠️ [UPDATE] Failed to delete old file: \(error.localizedDescription)")
+            // Continue since this is not critical
+        }
+        
+        // Clear the URL cache for both old and new file IDs to ensure fresh data
+        videoURLCache.removeValue(forKey: project.videoFileId)
+        videoURLCache.removeValue(forKey: file.id)
+        print("🧹 [UPDATE] Cleared URL cache for both old and new file IDs")
         
         // 4. Create and return updated VideoProject
-        return VideoProject(
+        let updatedProject = VideoProject(
             id: document.id,
             title: project.title,
             videoFileId: file.id,
@@ -386,6 +408,8 @@ class AppwriteService {
             createdAt: project.createdAt,
             userId: currentUserId
         )
+        print("✅ [UPDATE] Returning updated project with new videoFileId: \(updatedProject.videoFileId)")
+        return updatedProject
     }
     
     func updateProjectTitle(_ project: VideoProject, newTitle: String) async throws -> VideoProject {
