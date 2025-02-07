@@ -355,14 +355,10 @@ class AppwriteService {
         
         // 2. Update document in database with new file ID
         print("📤 [UPDATE] Updating document \(project.id) in collection: \(videosCollectionId)")
-        let now = Date()
-        let isoFormatter = ISO8601DateFormatter()
-        let isoDate = isoFormatter.string(from: now)
         
         let updateData: [String: Any] = [
             "videoFileID": file.id,  // Make sure this matches the field name in Appwrite
-            "duration": duration,
-            "updatedAt": isoDate
+            "duration": duration
         ]
         print("📤 [UPDATE] Update data: \(updateData)")
         
