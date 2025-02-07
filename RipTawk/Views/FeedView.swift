@@ -8,105 +8,178 @@
 import SwiftUI
 import AVKit
 
-struct FeedVideo: Identifiable {
-    let id = UUID()
-    let title: String
-    let author: String
-    let likes: Int
-    let comments: Int
-    let videoURL: URL
-}
+// Note: We now use VideoProject (from AppwriteService) as our video model.
 
 struct FeedView: View {
+    @StateObject private var viewModel = FeedViewModel()
     @State private var currentIndex = 0
-    @State private var videos: [FeedVideo] = [
-        FeedVideo(title: "Cool Dance", author: "User1", likes: 1200, comments: 45, videoURL: URL(string: "https://example.com")!),
-        FeedVideo(title: "Funny Moment", author: "User2", likes: 800, comments: 30, videoURL: URL(string: "https://example.com")!),
-    ]
     
     var body: some View {
         GeometryReader { geometry in
+            // The outer TabView is rotated -90° to achieve vertical paging
             TabView(selection: $currentIndex) {
-                ForEach(videos.indices, id: \.self) { index in
-                    FeedVideoView(video: videos[index])
-                        .rotationEffect(.degrees(0)) // Prevents auto-rotation
+                ForEach(viewModel.projects.indices, id: \.self) { index in
+                    // Rotate each child back by 90°
+                    FeedVideoView(project: viewModel.projects[index])
+                        .rotationEffect(.degrees(90))
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .tag(index)
+                        .onAppear {
+                            // Preload the next video when this video appears
+                            if index == currentIndex {
+                                preloadNextVideo(at: index + 1)
+                            }
+                        }
                 }
             }
-            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            // Swap the frame dimensions and rotate the TabView
+            .frame(width: geometry.size.height, height: geometry.size.width)
+            .rotationEffect(.degrees(-90))
             .ignoresSafeArea()
+        }
+        .onAppear {
+            Task {
+                await viewModel.loadFeedVideos()
+            }
+        }
+    }
+    
+    private func preloadNextVideo(at index: Int) {
+        guard index < viewModel.projects.count else { return }
+        let nextProject = viewModel.projects[index]
+        Task {
+            // Preload the video URL to warm the cache.
+            _ = try? await AppwriteService.shared.getVideoURL(fileId: nextProject.videoFileId)
+        }
+    }
+}
+
+@MainActor
+class FeedViewModel: ObservableObject {
+    @Published var projects: [VideoProject] = []
+    
+    func loadFeedVideos() async {
+        do {
+            // Load videos using the same ordering as in VideosView.
+            let projects = try await AppwriteService.shared.listUserVideos()
+            self.projects = projects
+        } catch {
+            print("❌ Error loading feed videos: \(error)")
         }
     }
 }
 
 struct FeedVideoView: View {
-    let video: FeedVideo
+    let project: VideoProject
+    @State private var videoURL: URL?
     @State private var isLiked = false
     
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            Color.black // Placeholder for video
-                .overlay(
-                    Text("Video Player Here")
-                        .foregroundColor(.white)
-                )
+        ZStack(alignment: .bottom) {
+            if let url = videoURL {
+                // Display the video using VideoPlayer
+                VideoPlayer(player: AVPlayer(url: url))
+                    .ignoresSafeArea()
+            } else {
+                // Loading state while fetching video URL
+                Color.black
+                ProgressView("Loading video...")
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+            }
             
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(video.author)
-                        .font(.headline)
-                    Text(video.title)
-                        .font(.subheadline)
-                }
-                .foregroundColor(.white)
-                .padding()
+            // Overlay the video description (placeholder texts)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Author: \(project.userId)") // Placeholder for author name
+                    .font(.headline)
+                Text(project.title)
+                    .font(.subheadline)
+                Text("Video description...") // Placeholder description
+                    .font(.body)
+            }
+            .foregroundColor(.white)
+            .padding()
+            .background(
+                // Adding a subtle black gradient for better text readability
+                LinearGradient(gradient: Gradient(colors: [Color.black.opacity(0.0), Color.black.opacity(0.6)]),
+                               startPoint: .top,
+                               endPoint: .bottom)
+                    .ignoresSafeArea()
+            )
+            
+            // Action buttons overlay placed at bottom right
+            VStack(spacing: 20) {
+                ActionButton(icon: isLiked ? "heart.fill" : "heart", text: "1200", action: {
+                    isLiked.toggle()
+                }, iconColor: isLiked ? .red : .white)
                 
-                Spacer()
+                ActionButton(icon: "message", text: "45", action: {
+                    // Implement comment action here.
+                })
                 
-                VStack(spacing: 20) {
-                    Button(action: { isLiked.toggle() }) {
-                        VStack {
-                            Image(systemName: isLiked ? "heart.fill" : "heart")
-                                .foregroundColor(isLiked ? .red : .white)
-                                .font(.system(size: 30))
-                            Text("\(video.likes)")
-                                .foregroundColor(.white)
-                        }
-                    }
-                    
-                    VStack {
-                        Image(systemName: "message")
-                            .font(.system(size: 30))
-                        Text("\(video.comments)")
-                    }
-                    .foregroundColor(.white)
-                    
-                    Button(action: {}) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 30))
-                            .foregroundColor(.white)
-                    }
+                ActionButton(icon: "square.and.arrow.up", text: nil, action: {
+                    // Implement share action here.
+                })
+            }
+            .padding(.bottom, 60)
+            .padding(.trailing, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        }
+        .onAppear {
+            loadVideo()
+        }
+    }
+    
+    private func loadVideo() {
+        Task {
+            do {
+                videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
+            } catch {
+                print("❌ Error loading video URL: \(error)")
+            }
+        }
+    }
+}
+
+// A reusable view for the action buttons (like, comment, share)
+struct ActionButton: View {
+    let icon: String
+    let text: String?
+    let action: () -> Void
+    var iconColor: Color = .white
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 30))
+                    .foregroundColor(iconColor)
+                    .padding(10)
+                    .background(Circle().fill(Color.black.opacity(0.6)))
+                    .overlay(Circle().stroke(Color.white, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.5), radius: 3, x: 0, y: 2)
+                if let text = text {
+                    Text(text)
+                        .foregroundColor(.white)
+                        .font(.footnote)
                 }
-                .padding(.bottom, 60)
-                .padding(.trailing)
             }
         }
     }
 }
 
 struct CommentsView: View {
-    let video: FeedVideo
+    let video: VideoProject  // Changed from FeedVideo to VideoProject
     @State private var newComment = ""
-
+    
     var body: some View {
         VStack {
             Text("Comments")
                 .font(.title)
                 .padding()
             
+            // Using a placeholder comment count (e.g. 3) since VideoProject doesn't have a comments property.
             List {
-                ForEach(1...video.comments, id: \.self) { index in
+                ForEach(1...3, id: \.self) { index in
                     CommentRow(username: "User\(index)", comment: "This is comment #\(index)")
                 }
             }

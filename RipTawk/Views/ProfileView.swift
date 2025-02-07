@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Appwrite
+import AVKit
 
 struct ProfileView: View {
     @State private var showSettings = false
@@ -51,6 +52,10 @@ struct ProfileView: View {
                             .cornerRadius(10)
                     }
                     .padding(.horizontal)
+                    
+                    // Example usage of VideoThumbnail for user's videos
+                    VideoThumbnail(video: sampleVideoProject)
+                        .padding(.horizontal)
                 }
                 .padding()
             }
@@ -76,33 +81,76 @@ struct ProfileView: View {
     }
 }
 
+// Replace the use of FeedVideo with VideoProject. Here, we generate a thumbnail asynchronously.
 struct VideoThumbnail: View {
-    let video: FeedVideo
+    let video: VideoProject  // Changed from FeedVideo to VideoProject
+    @State private var thumbnail: UIImage?
     
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: video.videoURL) { image in
-                image.resizable()
-            } placeholder: {
+            if let thumbnail = thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .clipped()
+            } else {
                 Color.gray
             }
-            .aspectRatio(9/16, contentMode: .fill)
-            .frame(height: 200)
-            .cornerRadius(8)
-            
             VStack(alignment: .leading) {
                 HStack {
                     Image(systemName: "heart.fill")
-                    Text("\(video.likes)")
+                    Text("1200") // Placeholder like count
                 }
                 .font(.caption)
                 .padding(4)
                 .background(Color.black.opacity(0.6))
                 .foregroundColor(.white)
                 .cornerRadius(4)
+                Spacer()
             }
             .padding(8)
         }
+        .frame(height: 200)
+        .cornerRadius(8)
+        .onAppear {
+            Task {
+                if thumbnail == nil {
+                    thumbnail = await generateThumbnail()
+                }
+            }
+        }
+    }
+    
+    private func generateThumbnail() async -> UIImage? {
+        do {
+            let videoURL = try await AppwriteService.shared.getVideoURL(fileId: video.videoFileId)
+            let asset = AVAsset(url: videoURL)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            let time = CMTime(seconds: 1, preferredTimescale: 600)
+            let cgImage = try generator.copyCGImage(at: time, actualTime: nil)
+            return UIImage(cgImage: cgImage)
+        } catch {
+            print("Thumbnail generation error: \(error)")
+            return nil
+        }
+    }
+}
+
+// A temporary sample VideoProject for preview/testing purposes.
+let sampleVideoProject = VideoProject(
+    id: "sampleID",
+    title: "Sample Video",
+    videoFileId: "sampleFileId",
+    duration: 120,
+    createdAt: Date(),
+    userId: "SampleUser"
+)
+
+struct SettingsView: View {
+    var body: some View {
+        Text("Settings")
+            .font(.largeTitle)
     }
 }
 
