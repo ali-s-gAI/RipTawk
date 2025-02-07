@@ -28,3 +28,27 @@
 ## Profile -> Settings
 - show in top right as wrench icon
 - Sign out button that signs out and redirects to login screen
+
+
+Update: Feb 7 01:18
+- FeedView:
+    - Fix vertical scrolling
+    - Preloading, persistence/cache (when we go back to a previous video, it has to reload, which is bad)
+    - Beautify buttons
+    - Before demoing, remove "Author" label and add username rather than Appwrite user ID
+    - Add share capability (only have button for now)
+    - Add like animation for fun
+    - 
+
+- Projects (VideoView):
+    - Fix renaming (it's not working)
+    - Add "Edit Title" and "Edit Description" above "Delete" on tap-and-hold
+
+- Settings:
+    - Remove unnecessary buttons
+    - 
+
+Update: Feb 7 03:02
+- Vertical scrolling works but UI is completely busted (see latest screenshot)
+- Audio does not persist after video is off screen, that's good
+- 2nd video did not load

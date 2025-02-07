@@ -22,31 +22,28 @@ struct FeedView: View {
             if viewModel.projects.isEmpty {
                 ProgressView("Loading videos...")
             } else {
-                // 1) Use a horizontal .page TabView, rotated to become vertical
                 TabView(selection: $currentIndex) {
                     ForEach(viewModel.projects.indices, id: \.self) { index in
-                        // 2) Rotate each video back so it's upright
                         FeedVideoView(
                             project: viewModel.projects[index],
-                            // Only active when the tab's index == currentIndex
                             isActive: currentIndex == index,
                             viewModel: viewModel,
                             index: index
                         )
-                        .rotationEffect(.degrees(-90))
-                        // 3) Because the TabView is turned 90°, 
-                        // now the height/width are reversed
                         .frame(
-                            width: geometry.size.height, 
-                            height: geometry.size.width
+                            width: geometry.size.width,
+                            height: geometry.size.height
                         )
                         .tag(index)
+                        .onAppear {
+                            print("📱 Video \(index) appeared in view")
+                            Task {
+                                await viewModel.preloadVideo(at: index + 1)
+                            }
+                        }
                     }
                 }
                 .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                // 4) Rotate the entire TabView 90° so swipes appear vertical
-                .rotationEffect(.degrees(90))
-                .frame(width: geometry.size.width, height: geometry.size.height)
                 .ignoresSafeArea()
                 // Pause old video, play newly visible video
                 .onChange(of: currentIndex) { oldIndex, newIndex in
@@ -64,9 +61,13 @@ struct FeedView: View {
         .onChange(of: scenePhase) { oldPhase, newPhase in
             if newPhase == .inactive || newPhase == .background {
                 viewModel.pausePlayer(for: currentIndex)
+                viewModel.cleanupAllPlayers()
             } else if newPhase == .active {
                 viewModel.playPlayer(for: currentIndex)
             }
+        }
+        .onDisappear {
+            viewModel.cleanupAllPlayers()
         }
     }
     
@@ -89,6 +90,10 @@ class FeedViewModel: ObservableObject {
     var videoURLCache: [String: URL] = [:]
     var players: [Int: AVPlayer] = [:]
     
+    // Track loading state
+    private var isPreloading = false
+    private var preloadedIndices = Set<Int>()
+    
     // Clean up players when view model is deinitialized
     deinit {
         for player in players.values {
@@ -97,11 +102,62 @@ class FeedViewModel: ObservableObject {
         players.removeAll()
     }
     
+    func preloadVideo(at index: Int) async {
+        guard index < projects.count,
+              !preloadedIndices.contains(index),
+              !isPreloading else {
+            print("⏭️ Skipping preload for index \(index): already loaded or invalid")
+            return
+        }
+        
+        isPreloading = true
+        print("🔄 Starting preload for video \(index)")
+        
+        do {
+            let project = projects[index]
+            if videoURLCache[project.videoFileId] == nil {
+                print("📥 Fetching URL for video \(index)")
+                let url = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
+                videoURLCache[project.videoFileId] = url
+                
+                // Pre-create AVPlayer but don't start playing
+                if players[index] == nil {
+                    print("🎬 Pre-creating player for video \(index)")
+                    let player = AVPlayer(url: url)
+                    player.automaticallyWaitsToMinimizeStalling = false
+                    // Preload the item
+                    if let asset = player.currentItem?.asset {
+                        try? await asset.load(.isPlayable)
+                    }
+                    players[index] = player
+                }
+                
+                preloadedIndices.insert(index)
+                print("✅ Successfully preloaded video \(index)")
+            } else {
+                print("📎 Using cached URL for video \(index)")
+            }
+        } catch {
+            print("❌ Error preloading video \(index): \(error)")
+        }
+        
+        isPreloading = false
+    }
+    
     func loadFeedVideos() async {
         do {
-            // Load videos using the same ordering as in VideosView.
+            print("📚 Starting to load feed videos")
             let projects = try await AppwriteService.shared.listUserVideos()
             self.projects = projects
+            print("📚 Loaded \(projects.count) videos")
+            
+            // Preload first two videos immediately
+            if !projects.isEmpty {
+                await preloadVideo(at: 0)
+                if projects.count > 1 {
+                    await preloadVideo(at: 1)
+                }
+            }
         } catch {
             print("❌ Error loading feed videos: \(error)")
         }
@@ -116,11 +172,26 @@ class FeedViewModel: ObservableObject {
     }
     
     func playPlayer(for index: Int) {
-        players[index]?.play()
-        // Ensure other players are paused
-        for (idx, player) in players where idx != index {
+        // First pause all players to prevent audio overlap
+        for (_, player) in players {
             player.pause()
+            player.seek(to: .zero)
         }
+        // Then play the current one
+        if let player = players[index] {
+            player.seek(to: .zero)
+            player.play()
+        }
+    }
+    
+    func cleanupAllPlayers() {
+        for (_, player) in players {
+            player.pause()
+            player.seek(to: .zero)
+            player.replaceCurrentItem(with: nil)
+        }
+        players.removeAll()
+        preloadedIndices.removeAll()
     }
 }
 
@@ -137,14 +208,19 @@ struct FeedVideoView: View {
             ZStack {
                 if let player = playerHolder.player {
                     CustomVideoPlayer(player: player)
-                        // Maintain 9:16 aspect ratio while filling the screen
-                        .aspectRatio(9/16, contentMode: .fit)
+                        // Fill screen while maintaining aspect ratio
+                        .aspectRatio(contentMode: .fill)
                         .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
                         .background(Color.black)
                         .ignoresSafeArea()
                 } else {
                     Color.black.ignoresSafeArea()
                     ProgressView("Loading video...")
+                    .onAppear {
+                        // Force load video if player is nil
+                        loadVideo()
+                    }
                 }
                 
                 // UI Overlay
@@ -190,19 +266,19 @@ struct FeedVideoView: View {
                         )
                     )
                 }
-                // Rotate UI elements back to normal
-                .rotationEffect(.degrees(90))
             }
         }
-        .onAppear {
-            if isActive && playerHolder.player == nil {
-                loadVideo()
-            } else if isActive {
-                playerHolder.player?.play()
+        .onChange(of: isActive) { _, newValue in
+            if newValue {
+                if playerHolder.player == nil {
+                    loadVideo()
+                } else {
+                    playerHolder.player?.seek(to: .zero)
+                    playerHolder.player?.play()
+                }
+            } else {
+                playerHolder.player?.pause()
             }
-        }
-        .onDisappear {
-            playerHolder.player?.pause()
         }
         // Listen for app state changes to handle background/foreground
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
@@ -213,21 +289,17 @@ struct FeedVideoView: View {
                 playerHolder.player?.play()
             }
         }
-        .onChange(of: isActive) { _, newValue in
-            if newValue {
-                playerHolder.player?.play()
-            } else {
-                playerHolder.player?.pause()
-            }
-        }
     }
     
     private func loadVideo() {
         Task {
+            print("🎥 Starting to load video for index \(index)")
             if let cachedURL = viewModel.videoURLCache[project.videoFileId] {
+                print("📎 Using cached URL for video \(index)")
                 await setupPlayer(with: cachedURL, index: index)
             } else {
                 do {
+                    print("📥 Fetching URL for video \(index)")
                     let url = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
                     viewModel.cacheVideoURL(url, for: project.videoFileId)
                     await setupPlayer(with: url, index: index)
@@ -239,14 +311,17 @@ struct FeedVideoView: View {
     }
     
     private func setupPlayer(with url: URL, index: Int) async {
+        print("🎬 Setting up player for video \(index)")
         let player = AVPlayer(url: url)
+        // Prevent blocking main thread with synchronous loading
+        player.automaticallyWaitsToMinimizeStalling = false
         player.actionAtItemEnd = .none
+        
         NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem,
             queue: .main
         ) { _ in
-            // loop
             player.seek(to: .zero)
             player.play()
         }
@@ -255,6 +330,7 @@ struct FeedVideoView: View {
             viewModel.players[index] = player
             playerHolder.player = player
             if isActive {
+                print("▶️ Auto-playing video \(index)")
                 player.play()
             }
         }
@@ -266,6 +342,7 @@ class PlayerHolder: ObservableObject {
     
     deinit {
         player?.pause()
+        player?.replaceCurrentItem(with: nil)
         player = nil
     }
 }
@@ -278,7 +355,7 @@ struct CustomVideoPlayer: UIViewControllerRepresentable {
         let controller = AVPlayerViewController()
         controller.player = player
         controller.showsPlaybackControls = false
-        controller.videoGravity = .resizeAspectFill
+        controller.videoGravity = .resizeAspect
         return controller
     }
     
