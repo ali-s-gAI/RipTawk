@@ -6,9 +6,18 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct MainTabView: View {
     @State private var selectedTab = 0
+    
+    init() {
+        // Set the tab bar appearance
+        let appearance = UITabBarAppearance()
+        appearance.configureWithDefaultBackground()
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+        UITabBar.appearance().standardAppearance = appearance
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -36,12 +45,17 @@ struct MainTabView: View {
                 }
                 .tag(3)
             
-            ProfileView()
+            SettingsView()
                 .tabItem {
-                    Label("Profile", systemImage: "person.fill")
+                    Label("Settings", systemImage: "gearshape.fill")
                 }
                 .tag(4)
         }
+        .tint(.blue) // Set the tint color for selected items
     }
+}
+
+#Preview {
+    MainTabView()
 }
 

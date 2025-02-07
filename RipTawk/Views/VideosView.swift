@@ -30,10 +30,10 @@ struct VideosView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 16) {
                     ForEach(projectManager.projects) { project in
-                        ProjectGridItem(project: project) {
+                        ProjectGridItem(project: project, onTitleTap: {
                             editingProject = project
                             showTitleEdit = true
-                        }
+                        })
                         .contextMenu {
                             Button(role: .destructive) {
                                 projectToDelete = project
@@ -96,6 +96,13 @@ struct VideosView: View {
                 await projectManager.loadProjects()
             }
         }
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }
 

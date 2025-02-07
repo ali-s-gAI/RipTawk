@@ -14,7 +14,6 @@ struct SettingsView: View {
     @State private var autoSaveInterval = 5
     @State private var selectedQuality = VideoQuality.high
     @State private var showSignOutAlert = false
-    @Environment(\.dismiss) private var dismiss
 
     enum VideoQuality: String, CaseIterable, Identifiable {
         case low, medium, high
@@ -22,17 +21,15 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
+                // Account Section
                 Section(header: Text("Account")) {
-                    NavigationLink("Account Settings") {
-                        Text("Account Settings")
-                    }
-                    NavigationLink("Subscription") {
-                        Text("Subscription Details")
-                    }
+                    NavigationLink("Account Settings", destination: AccountSettingsView())
+                    NavigationLink("Subscription", destination: Text("Subscription Details"))
                 }
                 
+                // App Settings Section
                 Section(header: Text("App Settings")) {
                     Toggle("Enable Notifications", isOn: $notificationsEnabled)
                     Toggle("Dark Mode", isOn: $darkModeEnabled)
@@ -48,15 +45,13 @@ struct SettingsView: View {
                     }
                 }
                 
+                // Support Section
                 Section(header: Text("Support")) {
-                    NavigationLink("Help & Support") {
-                        Text("Help Center")
-                    }
-                    NavigationLink("About") {
-                        Text("About RipTawk")
-                    }
+                    NavigationLink("Help & Support", destination: Text("Help Center"))
+                    NavigationLink("About", destination: Text("About RipTawk"))
                 }
                 
+                // Sign Out Section
                 Section {
                     Button(role: .destructive) {
                         showSignOutAlert = true
@@ -104,28 +99,27 @@ struct AccountSettingsView: View {
             }
             
             Section {
-                Button(action: {
-                    // Save changes
-                }) {
-                    Text("Save Changes")
+                Button("Save Changes") {
+                    // Save changes action here.
                 }
             }
             
             Section {
-                NavigationLink(destination: Text("Change Password")) {
-                    Text("Change Password")
-                }
-                NavigationLink(destination: Text("Privacy Settings")) {
-                    Text("Privacy Settings")
-                }
+                NavigationLink("Change Password", destination: Text("Change Password"))
+                NavigationLink("Privacy Settings", destination: Text("Privacy Settings"))
             }
         }
         .navigationTitle("Account Settings")
     }
 }
 
-// Add this extension somewhere in your project, like in a separate Notifications.swift file
 extension Notification.Name {
     static let userDidSignOut = Notification.Name("userDidSignOut")
+}
+
+struct SettingsView_Previews: PreviewProvider {
+    static var previews: some View {
+        SettingsView()
+    }
 }
 

@@ -13,33 +13,59 @@ import AVKit
 struct FeedView: View {
     @StateObject private var viewModel = FeedViewModel()
     @State private var currentIndex = 0
+    @Environment(\.scenePhase) private var scenePhase
+    
+    init() {}  // Remove UITabBar appearance configuration
     
     var body: some View {
         GeometryReader { geometry in
-            // The outer TabView is rotated -90° to achieve vertical paging
-            TabView(selection: $currentIndex) {
-                ForEach(viewModel.projects.indices, id: \.self) { index in
-                    // Rotate each child back by 90°
-                    FeedVideoView(project: viewModel.projects[index])
-                        .rotationEffect(.degrees(90))
-                        .frame(width: geometry.size.width, height: geometry.size.height)
+            if viewModel.projects.isEmpty {
+                ProgressView("Loading videos...")
+            } else {
+                // 1) Use a horizontal .page TabView, rotated to become vertical
+                TabView(selection: $currentIndex) {
+                    ForEach(viewModel.projects.indices, id: \.self) { index in
+                        // 2) Rotate each video back so it's upright
+                        FeedVideoView(
+                            project: viewModel.projects[index],
+                            // Only active when the tab's index == currentIndex
+                            isActive: currentIndex == index,
+                            viewModel: viewModel,
+                            index: index
+                        )
+                        .rotationEffect(.degrees(-90))
+                        // 3) Because the TabView is turned 90°, 
+                        // now the height/width are reversed
+                        .frame(
+                            width: geometry.size.height, 
+                            height: geometry.size.width
+                        )
                         .tag(index)
-                        .onAppear {
-                            // Preload the next video when this video appears
-                            if index == currentIndex {
-                                preloadNextVideo(at: index + 1)
-                            }
-                        }
+                    }
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                // 4) Rotate the entire TabView 90° so swipes appear vertical
+                .rotationEffect(.degrees(90))
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .ignoresSafeArea()
+                // Pause old video, play newly visible video
+                .onChange(of: currentIndex) { oldIndex, newIndex in
+                    viewModel.pausePlayer(for: oldIndex)
+                    viewModel.playPlayer(for: newIndex)
                 }
             }
-            // Swap the frame dimensions and rotate the TabView
-            .frame(width: geometry.size.height, height: geometry.size.width)
-            .rotationEffect(.degrees(-90))
-            .ignoresSafeArea()
         }
         .onAppear {
             Task {
                 await viewModel.loadFeedVideos()
+            }
+        }
+        // Handle app switching between tabs
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            if newPhase == .inactive || newPhase == .background {
+                viewModel.pausePlayer(for: currentIndex)
+            } else if newPhase == .active {
+                viewModel.playPlayer(for: currentIndex)
             }
         }
     }
@@ -48,8 +74,11 @@ struct FeedView: View {
         guard index < viewModel.projects.count else { return }
         let nextProject = viewModel.projects[index]
         Task {
-            // Preload the video URL to warm the cache.
-            _ = try? await AppwriteService.shared.getVideoURL(fileId: nextProject.videoFileId)
+            // Cache video URL for smooth transitions
+            if viewModel.videoURLCache[nextProject.videoFileId] == nil {
+                let url = try? await AppwriteService.shared.getVideoURL(fileId: nextProject.videoFileId)
+                viewModel.cacheVideoURL(url, for: nextProject.videoFileId)
+            }
         }
     }
 }
@@ -57,6 +86,16 @@ struct FeedView: View {
 @MainActor
 class FeedViewModel: ObservableObject {
     @Published var projects: [VideoProject] = []
+    var videoURLCache: [String: URL] = [:]
+    var players: [Int: AVPlayer] = [:]
+    
+    // Clean up players when view model is deinitialized
+    deinit {
+        for player in players.values {
+            player.pause()
+        }
+        players.removeAll()
+    }
     
     func loadFeedVideos() async {
         do {
@@ -67,76 +106,184 @@ class FeedViewModel: ObservableObject {
             print("❌ Error loading feed videos: \(error)")
         }
     }
+    
+    func cacheVideoURL(_ url: URL?, for fileId: String) {
+        videoURLCache[fileId] = url
+    }
+    
+    func pausePlayer(for index: Int) {
+        players[index]?.pause()
+    }
+    
+    func playPlayer(for index: Int) {
+        players[index]?.play()
+        // Ensure other players are paused
+        for (idx, player) in players where idx != index {
+            player.pause()
+        }
+    }
 }
 
 struct FeedVideoView: View {
     let project: VideoProject
-    @State private var videoURL: URL?
+    let isActive: Bool
+    let viewModel: FeedViewModel
+    let index: Int
+    @StateObject private var playerHolder = PlayerHolder()
     @State private var isLiked = false
     
     var body: some View {
-        ZStack(alignment: .bottom) {
-            if let url = videoURL {
-                // Display the video using VideoPlayer
-                VideoPlayer(player: AVPlayer(url: url))
-                    .ignoresSafeArea()
-            } else {
-                // Loading state while fetching video URL
-                Color.black
-                ProgressView("Loading video...")
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-            }
-            
-            // Overlay the video description (placeholder texts)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Author: \(project.userId)") // Placeholder for author name
-                    .font(.headline)
-                Text(project.title)
-                    .font(.subheadline)
-                Text("Video description...") // Placeholder description
-                    .font(.body)
-            }
-            .foregroundColor(.white)
-            .padding()
-            .background(
-                // Adding a subtle black gradient for better text readability
-                LinearGradient(gradient: Gradient(colors: [Color.black.opacity(0.0), Color.black.opacity(0.6)]),
-                               startPoint: .top,
-                               endPoint: .bottom)
-                    .ignoresSafeArea()
-            )
-            
-            // Action buttons overlay placed at bottom right
-            VStack(spacing: 20) {
-                ActionButton(icon: isLiked ? "heart.fill" : "heart", text: "1200", action: {
-                    isLiked.toggle()
-                }, iconColor: isLiked ? .red : .white)
+        GeometryReader { geometry in
+            ZStack {
+                if let player = playerHolder.player {
+                    CustomVideoPlayer(player: player)
+                        // Maintain 9:16 aspect ratio while filling the screen
+                        .aspectRatio(9/16, contentMode: .fit)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .background(Color.black)
+                        .ignoresSafeArea()
+                } else {
+                    Color.black.ignoresSafeArea()
+                    ProgressView("Loading video...")
+                }
                 
-                ActionButton(icon: "message", text: "45", action: {
-                    // Implement comment action here.
-                })
-                
-                ActionButton(icon: "square.and.arrow.up", text: nil, action: {
-                    // Implement share action here.
-                })
+                // UI Overlay
+                VStack {
+                    Spacer()
+                    
+                    HStack(alignment: .bottom) {
+                        // Video info on the left
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Author: \(project.userId)")
+                                .font(.headline)
+                            Text(project.title)
+                                .font(.subheadline)
+                            Text("Video description...")
+                                .font(.body)
+                        }
+                        .foregroundColor(.white)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        // Action buttons on the right
+                        VStack(spacing: 20) {
+                            ActionButton(icon: isLiked ? "heart.fill" : "heart", text: "1200", action: {
+                                isLiked.toggle()
+                            }, iconColor: isLiked ? .red : .white)
+                            
+                            ActionButton(icon: "message", text: "45", action: {
+                                // Implement comment action here.
+                            })
+                            
+                            ActionButton(icon: "square.and.arrow.up", text: nil, action: {
+                                // Implement share action here.
+                            })
+                        }
+                        .padding(.trailing, 16)
+                    }
+                    .padding(.bottom, 50)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [.clear, .black.opacity(0.7)]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                }
+                // Rotate UI elements back to normal
+                .rotationEffect(.degrees(90))
             }
-            .padding(.bottom, 60)
-            .padding(.trailing, 16)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
         .onAppear {
-            loadVideo()
+            if isActive && playerHolder.player == nil {
+                loadVideo()
+            } else if isActive {
+                playerHolder.player?.play()
+            }
+        }
+        .onDisappear {
+            playerHolder.player?.pause()
+        }
+        // Listen for app state changes to handle background/foreground
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            playerHolder.player?.pause()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            if isActive {
+                playerHolder.player?.play()
+            }
+        }
+        .onChange(of: isActive) { _, newValue in
+            if newValue {
+                playerHolder.player?.play()
+            } else {
+                playerHolder.player?.pause()
+            }
         }
     }
     
     private func loadVideo() {
         Task {
-            do {
-                videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
-            } catch {
-                print("❌ Error loading video URL: \(error)")
+            if let cachedURL = viewModel.videoURLCache[project.videoFileId] {
+                await setupPlayer(with: cachedURL, index: index)
+            } else {
+                do {
+                    let url = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
+                    viewModel.cacheVideoURL(url, for: project.videoFileId)
+                    await setupPlayer(with: url, index: index)
+                } catch {
+                    print("❌ Error loading video URL: \(error)")
+                }
             }
         }
+    }
+    
+    private func setupPlayer(with url: URL, index: Int) async {
+        let player = AVPlayer(url: url)
+        player.actionAtItemEnd = .none
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: player.currentItem,
+            queue: .main
+        ) { _ in
+            // loop
+            player.seek(to: .zero)
+            player.play()
+        }
+        
+        await MainActor.run {
+            viewModel.players[index] = player
+            playerHolder.player = player
+            if isActive {
+                player.play()
+            }
+        }
+    }
+}
+
+class PlayerHolder: ObservableObject {
+    @Published var player: AVPlayer?
+    
+    deinit {
+        player?.pause()
+        player = nil
+    }
+}
+
+// Custom video player view that properly handles aspect ratio and filling
+struct CustomVideoPlayer: UIViewControllerRepresentable {
+    let player: AVPlayer
+    
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.showsPlaybackControls = false
+        controller.videoGravity = .resizeAspectFill
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+        uiViewController.player = player
     }
 }
 
@@ -215,6 +362,14 @@ struct CommentRow: View {
                     .font(.subheadline)
             }
         }
+    }
+}
+
+// Add this new struct for scroll tracking
+struct ViewOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value += nextValue()
     }
 }
 
