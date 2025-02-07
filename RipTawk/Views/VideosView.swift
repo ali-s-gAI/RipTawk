@@ -20,20 +20,20 @@ struct VideosView: View {
     @State private var showDeleteConfirmation = false
     
     private let columns = [
-        GridItem(.flexible()),
-        GridItem(.flexible()),
-        GridItem(.flexible())
+        GridItem(.flexible(), spacing: 1),
+        GridItem(.flexible(), spacing: 1)
     ]
     
     var body: some View {
         NavigationView {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 16) {
+                LazyVGrid(columns: columns, spacing: 1) {
                     ForEach(projectManager.projects) { project in
                         ProjectGridItem(project: project, onTitleTap: {
                             editingProject = project
                             showTitleEdit = true
                         })
+                        .transition(.scale)
                         .contextMenu {
                             Button(role: .destructive) {
                                 projectToDelete = project
@@ -44,14 +44,16 @@ struct VideosView: View {
                         }
                     }
                 }
-                .padding()
             }
-            .navigationTitle("My Projects")
+            .background(Color(.systemGray6))
+            .navigationTitle("My Videos")
             .toolbar {
                 Button(action: {
                     showMediaPicker = true
                 }) {
-                    Image(systemName: "plus")
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.primary)
                 }
             }
             .sheet(isPresented: $showMediaPicker) {
@@ -112,6 +114,7 @@ struct ProjectGridItem: View {
     @State private var thumbnail: UIImage?
     @State private var editedTitle: String
     @State private var showEditor = false
+    @State private var isPressed = false
 
     init(project: VideoProject, onTitleTap: @escaping () -> Void) {
         self.project = project
@@ -121,40 +124,69 @@ struct ProjectGridItem: View {
 
     var body: some View {
         Button {
-            showEditor = true
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                isPressed = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                showEditor = true
+                isPressed = false
+            }
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(spacing: 0) {
                 // Thumbnail
-                Group {
-                    if let thumbnail = thumbnail {
-                        Image(uiImage: thumbnail)
-                            .resizable()
-                            .aspectRatio(16/9, contentMode: .fill)
-                    } else {
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.3))
-                            .aspectRatio(16/9, contentMode: .fill)
+                ZStack(alignment: .bottomLeading) {
+                    Group {
+                        if let thumbnail = thumbnail {
+                            Image(uiImage: thumbnail)
+                                .resizable()
+                                .aspectRatio(9/16, contentMode: .fill)
+                        } else {
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .aspectRatio(9/16, contentMode: .fill)
+                                .overlay {
+                                    ProgressView()
+                                }
+                        }
+                    }
+                    .overlay {
+                        // Video Duration Overlay
+                        Text(formatDuration(project.duration))
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(4)
+                            .padding(8)
+                    }
+                    
+                    // Title Overlay
+                    LinearGradient(
+                        gradient: Gradient(colors: [.black.opacity(0.5), .clear]),
+                        startPoint: .bottom,
+                        endPoint: .center
+                    )
+                    .overlay {
+                        VStack(alignment: .leading) {
+                            Spacer()
+                            Text(project.title)
+                                .font(.caption)
+                                .bold()
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .padding(.horizontal, 8)
+                                .padding(.bottom, 8)
+                        }
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .cornerRadius(8)
-                .clipped()
-
-                // Title (tappable)
-                Button(action: onTitleTap) {
-                    Text(project.title)
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                // Date
-                Text(formatDate(project.createdAt))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
+            .background(Color.black)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .scaleEffect(isPressed ? 0.95 : 1.0)
+            .shadow(radius: 2)
+            .padding(4)
         }
+        .buttonStyle(.plain)
         .fullScreenCover(isPresented: $showEditor) {
             VideoEditorSwiftUIView(video: nil, existingProject: project)
                 .overlay(alignment: .topLeading) {
@@ -193,6 +225,17 @@ struct ProjectGridItem: View {
     }
     
     private func generateThumbnail() async -> UIImage? {
+        // Check if thumbnail exists in cache
+        let fileManager = FileManager.default
+        let cachePath = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let thumbnailURL = cachePath.appendingPathComponent("\(project.videoFileId)_thumb.jpg")
+        
+        if fileManager.fileExists(atPath: thumbnailURL.path),
+           let cachedImage = UIImage(contentsOfFile: thumbnailURL.path) {
+            return cachedImage
+        }
+        
+        // Generate new thumbnail
         do {
             let videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
             let asset = AVAsset(url: videoURL)
@@ -200,11 +243,24 @@ struct ProjectGridItem: View {
             generator.appliesPreferredTrackTransform = true
             let time = CMTime(seconds: 1, preferredTimescale: 600)
             let cgImage = try generator.copyCGImage(at: time, actualTime: nil)
-            return UIImage(cgImage: cgImage)
+            let image = UIImage(cgImage: cgImage)
+            
+            // Cache the thumbnail
+            if let data = image.jpegData(compressionQuality: 0.7) {
+                try data.write(to: thumbnailURL)
+            }
+            
+            return image
         } catch {
             print("Thumbnail generation error: \(error)")
             return nil
         }
+    }
+    
+    private func formatDuration(_ duration: Double) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 
@@ -378,5 +434,15 @@ class ProjectManager: ObservableObject {
             print("❌ Error updating project title: \(error)")
         }
     }
+}
+
+// Helper extension for date formatting
+extension DateFormatter {
+    static let mediumDateTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 }
 

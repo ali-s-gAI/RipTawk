@@ -35,10 +35,18 @@ class AppwriteService {
     private let videoBucketId = "67a2eabd002ffabdf95f"  // videos
     @AppStorage("currentUserId") private var currentUserId: String = ""
     
-    // Add a cache for video URLs
+    // This cache is cleared when app restarts
     private var videoURLCache: [String: URL] = [:]
     
+    private let urlCache: URLCache
+    
     private init() {
+        // 50MB memory cache, 100MB disk cache
+        urlCache = URLCache(memoryCapacity: 50*1024*1024, 
+                          diskCapacity: 100*1024*1024, 
+                          diskPath: "videos")
+        URLCache.shared = urlCache
+        
         // Initialize Client with proper session handling
         client = Client()
             .setEndpoint("https://cloud.appwrite.io/v1")
@@ -244,21 +252,15 @@ class AppwriteService {
     }
     
     func getVideoURL(fileId: String) async throws -> URL {
-        // Check in-memory cache first
+        // Check cache first
         if let cachedURL = videoURLCache[fileId] {
             return cachedURL
         }
         
         print("📥 Getting video URL for file ID: \(fileId)")
         
-        let file = try await storage.getFile(
-            bucketId: videoBucketId,
-            fileId: fileId
-        )
-        
-        let session = try await account.getSession(sessionId: "current")
-        
-        let urlString = "\(client.endPoint)/storage/buckets/\(videoBucketId)/files/\(fileId)/download"
+        // Get the file view URL
+        let urlString = "\(client.endPoint)/storage/buckets/\(videoBucketId)/files/\(fileId)/view"
         guard var urlComponents = URLComponents(string: urlString) else {
             throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid video URL"])
         }
@@ -271,23 +273,14 @@ class AppwriteService {
             throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid video URL"])
         }
         
-        var request = URLRequest(url: url)
-        request.addValue("a_session_\(session.id)", forHTTPHeaderField: "Cookie")
-        
+        // Configure caching for the request
         let config = URLSessionConfiguration.default
-        config.httpCookieStorage?.setCookie(HTTPCookie(properties: [
-            .domain: URL(string: client.endPoint)?.host ?? "",
-            .path: "/",
-            .name: "a_session_\(session.id)",
-            .value: session.id,
-            .secure: "TRUE"
-        ])!)
-        URLSession.shared.configuration.httpCookieStorage = config.httpCookieStorage
+        config.requestCachePolicy = .returnCacheDataElseLoad
+        config.urlCache = urlCache
         
-        print("📥 Got video URL: \(url.absoluteString)")
-        
-        // Cache the URL before returning
+        // Cache the URL
         videoURLCache[fileId] = url
+        
         return url
     }
     
@@ -345,7 +338,7 @@ class AppwriteService {
         }
         
         // 1. Upload new file to storage first
-        print("📤 [UPDATE] Uploading new file to bucket: \(videoBucketId)")
+        print("�� [UPDATE] Uploading new file to bucket: \(videoBucketId)")
         let file = try await storage.createFile(
             bucketId: videoBucketId,
             fileId: ID.unique(),

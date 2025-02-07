@@ -19,55 +19,75 @@ struct FeedView: View {
     
     var body: some View {
         GeometryReader { geometry in
-            if viewModel.projects.isEmpty {
-                ProgressView("Loading videos...")
-            } else {
-                TabView(selection: $currentIndex) {
-                    ForEach(viewModel.projects.indices, id: \.self) { index in
-                        FeedVideoView(
-                            project: viewModel.projects[index],
-                            isActive: currentIndex == index,
-                            viewModel: viewModel,
-                            index: index
-                        )
-                        .frame(
-                            width: geometry.size.width,
-                            height: geometry.size.height
-                        )
-                        .tag(index)
-                        .onAppear {
-                            print("📱 Video \(index) appeared in view")
-                            Task {
-                                await viewModel.preloadVideo(at: index + 1)
-                            }
-                        }
-                    }
-                }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                .ignoresSafeArea()
-                // Pause old video, play newly visible video
-                .onChange(of: currentIndex) { oldIndex, newIndex in
-                    viewModel.pausePlayer(for: oldIndex)
-                    viewModel.playPlayer(for: newIndex)
-                }
-            }
+            feedContent(geometry)
         }
         .onAppear {
             Task {
                 await viewModel.loadFeedVideos()
             }
         }
-        // Handle app switching between tabs
-        .onChange(of: scenePhase) { oldPhase, newPhase in
-            if newPhase == .inactive || newPhase == .background {
-                viewModel.pausePlayer(for: currentIndex)
-                viewModel.cleanupAllPlayers()
-            } else if newPhase == .active {
-                viewModel.playPlayer(for: currentIndex)
+        .onDisappear {
+            print("📱 FeedView disappeared - cleaning up players")
+            viewModel.cleanupAllPlayers()
+        }
+        .onChange(of: scenePhase, handleScenePhaseChange)
+    }
+    
+    @ViewBuilder
+    private func feedContent(_ geometry: GeometryProxy) -> some View {
+        if viewModel.projects.isEmpty {
+            ProgressView("Loading videos...")
+        } else {
+            feedTabView(geometry)
+        }
+    }
+    
+    private func feedTabView(_ geometry: GeometryProxy) -> some View {
+        TabView(selection: $currentIndex) {
+            ForEach(viewModel.projects.indices, id: \.self) { index in
+                FeedVideoView(
+                    project: viewModel.projects[index],
+                    isActive: currentIndex == index,
+                    viewModel: viewModel,
+                    index: index
+                )
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height
+                )
+                .tag(index)
+                .onAppear {
+                    print("📱 Video \(index) appeared in view")
+                    Task {
+                        await viewModel.preloadVideo(at: index + 1, currentIndex: currentIndex)
+                    }
+                }
             }
         }
-        .onDisappear {
+        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+        .ignoresSafeArea()
+        .onChange(of: currentIndex) { oldIndex, newIndex in
+            viewModel.pausePlayer(for: oldIndex)
+            viewModel.playPlayer(for: newIndex)
+        }
+    }
+    
+    private func handleScenePhaseChange(_ oldPhase: ScenePhase, _ newPhase: ScenePhase) {
+        switch newPhase {
+        case .inactive, .background:
+            print("📱 App entering background - pausing playback")
+            viewModel.pausePlayer(for: currentIndex)
             viewModel.cleanupAllPlayers()
+        case .active:
+            print("📱 App becoming active")
+            if viewModel.players.isEmpty {
+                Task {
+                    await viewModel.preloadVideo(at: currentIndex, currentIndex: currentIndex)
+                }
+            }
+            viewModel.playPlayer(for: currentIndex)
+        @unknown default:
+            break
         }
     }
     
@@ -89,10 +109,21 @@ class FeedViewModel: ObservableObject {
     @Published var projects: [VideoProject] = []
     var videoURLCache: [String: URL] = [:]
     var players: [Int: AVPlayer] = [:]
+    var preloadedIndices = Set<Int>()
     
-    // Track loading state
-    private var isPreloading = false
-    private var preloadedIndices = Set<Int>()
+    // Keep these private
+    private var activeDownloads: Set<String> = []
+    private let fileManager = FileManager.default
+    private var cachePath: URL? {
+        fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("videoCache")
+    }
+    
+    init() {
+        // Create cache directory if needed
+        if let path = cachePath {
+            try? fileManager.createDirectory(at: path, withIntermediateDirectories: true)
+        }
+    }
     
     // Clean up players when view model is deinitialized
     deinit {
@@ -102,46 +133,48 @@ class FeedViewModel: ObservableObject {
         players.removeAll()
     }
     
-    func preloadVideo(at index: Int) async {
+    func preloadVideo(at index: Int, currentIndex: Int) async {
         guard index < projects.count,
-              !preloadedIndices.contains(index),
-              !isPreloading else {
-            print("⏭️ Skipping preload for index \(index): already loaded or invalid")
+              !preloadedIndices.contains(index) else {
+            print("⏭️ Skipping preload - already loaded or invalid index")
             return
         }
         
-        isPreloading = true
-        print("🔄 Starting preload for video \(index)")
+        let project = projects[index]
         
         do {
-            let project = projects[index]
-            if videoURLCache[project.videoFileId] == nil {
-                print("📥 Fetching URL for video \(index)")
-                let url = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
-                videoURLCache[project.videoFileId] = url
+            print("🔄 Preloading video at index \(index)")
+            let url = try await getVideoURL(for: project.videoFileId)
+            videoURLCache[project.videoFileId] = url
+            
+            // Create and prepare player in background
+            if players[index] == nil {
+                let player = AVPlayer(url: url)
+                player.automaticallyWaitsToMinimizeStalling = false
                 
-                // Pre-create AVPlayer but don't start playing
-                if players[index] == nil {
-                    print("🎬 Pre-creating player for video \(index)")
-                    let player = AVPlayer(url: url)
-                    player.automaticallyWaitsToMinimizeStalling = false
-                    // Preload the item
-                    if let asset = player.currentItem?.asset {
-                        try? await asset.load(.isPlayable)
-                    }
-                    players[index] = player
+                // Configure buffer size for smoother playback
+                let playerItem = player.currentItem
+                playerItem?.preferredForwardBufferDuration = 3.0
+                
+                // Start preloading the asset
+                if let asset = playerItem?.asset {
+                    // Load essential properties
+                    try? await asset.load(.duration, .tracks)
                 }
                 
+                players[index] = player
                 preloadedIndices.insert(index)
-                print("✅ Successfully preloaded video \(index)")
-            } else {
-                print("📎 Using cached URL for video \(index)")
+                print("✅ Player created and preloaded for index \(index)")
             }
+            
+            // Preload next video if needed
+            if index == currentIndex && index + 1 < projects.count {
+                await preloadVideo(at: index + 1, currentIndex: currentIndex)
+            }
+            
         } catch {
-            print("❌ Error preloading video \(index): \(error)")
+            print("❌ Error preloading video: \(error)")
         }
-        
-        isPreloading = false
     }
     
     func loadFeedVideos() async {
@@ -151,12 +184,10 @@ class FeedViewModel: ObservableObject {
             self.projects = projects
             print("📚 Loaded \(projects.count) videos")
             
-            // Preload first two videos immediately
+            // Immediately start preloading first video
             if !projects.isEmpty {
-                await preloadVideo(at: 0)
-                if projects.count > 1 {
-                    await preloadVideo(at: 1)
-                }
+                print("🔄 Preloading first video")
+                await preloadVideo(at: 0, currentIndex: 0)
             }
         } catch {
             print("❌ Error loading feed videos: \(error)")
@@ -185,13 +216,95 @@ class FeedViewModel: ObservableObject {
     }
     
     func cleanupAllPlayers() {
-        for (_, player) in players {
+        print("🧹 Cleaning up all players")
+        for (index, player) in players {
+            print("⏹️ Pausing player \(index)")
             player.pause()
-            player.seek(to: .zero)
-            player.replaceCurrentItem(with: nil)
+            // Don't replace item with nil, just pause
         }
-        players.removeAll()
-        preloadedIndices.removeAll()
+        // Don't remove all players, keep them cached
+    }
+    
+    func getVideoURL(for fileId: String) async throws -> URL {
+        // Check memory cache first
+        if let cachedURL = videoURLCache[fileId] {
+            print("📎 Using memory-cached URL for \(fileId)")
+            // Ensure file still exists
+            if cachedURL.isFileURL && FileManager.default.fileExists(atPath: cachedURL.path) {
+                return cachedURL
+            } else {
+                videoURLCache.removeValue(forKey: fileId)
+            }
+        }
+        
+        // Check disk cache
+        if let localURL = getCachedVideoURL(for: fileId) {
+            print("📎 Using disk-cached video for \(fileId)")
+            videoURLCache[fileId] = localURL
+            return localURL
+        }
+        
+        // Prevent concurrent downloads of the same video
+        guard !activeDownloads.contains(fileId) else {
+            print("⏳ Waiting for existing download of \(fileId)")
+            // Wait for existing download
+            while activeDownloads.contains(fileId) {
+                try await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+            }
+            if let url = videoURLCache[fileId] {
+                return url
+            }
+            throw NSError(domain: "", code: -1)
+        }
+        
+        activeDownloads.insert(fileId)
+        defer { activeDownloads.remove(fileId) }
+        
+        // Download and cache
+        print("📥 Downloading video \(fileId)")
+        let url = try await AppwriteService.shared.getVideoURL(fileId: fileId)
+        
+        // Cache to disk
+        if let localURL = try? await cacheVideo(from: url, fileId: fileId) {
+            videoURLCache[fileId] = localURL
+            return localURL
+        }
+        
+        return url
+    }
+    
+    private func getCachedVideoURL(for fileId: String) -> URL? {
+        guard let cachePath = cachePath else { return nil }
+        // Use ".mp4" extension for consistent lookups
+        let videoURL = cachePath.appendingPathComponent(fileId).appendingPathExtension("mp4")
+        return fileManager.fileExists(atPath: videoURL.path) ? videoURL : nil
+    }
+    
+    private func cacheVideo(from url: URL, fileId: String) async throws -> URL? {
+        guard let cachePath = cachePath else { return nil }
+        // Always end with ".mp4"
+        let destinationURL = cachePath.appendingPathComponent(fileId).appendingPathExtension("mp4")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let mimeType = response.mimeType, mimeType.starts(with: "video/") else {
+                print("❌ Invalid content type received")
+                throw NSError(domain: "", code: -1)
+            }
+            
+            // Remove old file to avoid partial/corrupt reuse
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+
+            try data.write(to: destinationURL)
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: destinationURL.path)
+            print("💾 Cached video \(fileId) to disk at \(destinationURL)")
+            return destinationURL
+        } catch {
+            print("❌ Error caching video: \(error)")
+            return nil
+        }
     }
 }
 
@@ -202,6 +315,18 @@ struct FeedVideoView: View {
     let index: Int
     @StateObject private var playerHolder = PlayerHolder()
     @State private var isLiked = false
+    @State private var isPlaying = true
+    @State private var showCoinAnimation = false
+    @State private var lastTapPosition: CGPoint = .zero
+    @State private var lastTapTime: Date = Date()
+    @State private var tapCount = 0
+    
+    // Reset state when video becomes inactive
+    private func handleInactiveState() {
+        isPlaying = true  // Reset to true when video becomes inactive
+        playerHolder.player?.pause()
+        // Don't seek to zero or cleanup player here
+    }
     
     var body: some View {
         GeometryReader { geometry in
@@ -223,6 +348,52 @@ struct FeedVideoView: View {
                     }
                 }
                 
+                // Replace the existing gesture overlay with this:
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { location in
+                        let now = Date()
+                        let timeSinceLastTap = now.timeIntervalSince(lastTapTime)
+                        
+                        if timeSinceLastTap < 0.3 {
+                            // Double tap detected
+                            tapCount = 0
+                            lastTapPosition = location
+                            handleDoubleTap()
+                        } else {
+                            // Potential single tap
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                if tapCount == 1 {
+                                    handleSingleTap()
+                                }
+                                tapCount = 0
+                            }
+                            tapCount += 1
+                        }
+                        lastTapTime = now
+                    }
+                
+                // Play button
+                if !isPlaying {
+                    Circle()
+                        .fill(.black.opacity(0.6))
+                        .frame(width: 80, height: 80)
+                        .overlay(
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 40))
+                                .foregroundColor(.white)
+                        )
+                        .transition(.scale.combined(with: .opacity))
+                }
+                
+                // Coin animation
+                if showCoinAnimation {
+                    CoinAnimation(
+                        isVisible: $showCoinAnimation,
+                        position: lastTapPosition
+                    )
+                }
+                
                 // UI Overlay
                 VStack {
                     Spacer()
@@ -241,21 +412,41 @@ struct FeedVideoView: View {
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
                         
-                        // Action buttons on the right
-                        VStack(spacing: 20) {
-                            ActionButton(icon: isLiked ? "heart.fill" : "heart", text: "1200", action: {
-                                isLiked.toggle()
-                            }, iconColor: isLiked ? .red : .white)
+                        // Updated action buttons
+                        VStack(spacing: 28) {
+                            ActionButton(
+                                icon: isLiked ? "chart.line.uptrend.xyaxis.circle.fill" : "chart.line.uptrend.xyaxis",
+                                text: isLiked ? "1" : "0",
+                                action: { handleLike() },
+                                iconColor: isLiked ? Color.brandPrimary : .white
+                            )
                             
-                            ActionButton(icon: "message", text: "45", action: {
-                                // Implement comment action here.
-                            })
+                            ActionButton(
+                                icon: "bubble.right",
+                                text: "0",
+                                action: {
+                                    // Implement comment action
+                                }
+                            )
                             
-                            ActionButton(icon: "square.and.arrow.up", text: nil, action: {
-                                // Implement share action here.
-                            })
+                            ActionButton(
+                                icon: "arrowshape.turn.up.forward",
+                                text: "Share",
+                                action: {
+                                    // Implement share action
+                                }
+                            )
+                            
+                            ActionButton(
+                                icon: "dollarsign.circle",
+                                text: "Tip",
+                                action: {
+                                    // Implement tips/monetization
+                                }
+                            )
                         }
-                        .padding(.trailing, 16)
+                        .padding(.bottom, 20)
+                        .padding(.trailing, 8)
                     }
                     .padding(.bottom, 50)
                     .background(
@@ -274,10 +465,12 @@ struct FeedVideoView: View {
                     loadVideo()
                 } else {
                     playerHolder.player?.seek(to: .zero)
-                    playerHolder.player?.play()
+                    if isPlaying {
+                        playerHolder.player?.play()
+                    }
                 }
             } else {
-                playerHolder.player?.pause()
+                handleInactiveState()
             }
         }
         // Listen for app state changes to handle background/foreground
@@ -289,58 +482,113 @@ struct FeedVideoView: View {
                 playerHolder.player?.play()
             }
         }
+        // Update FeedVideoView to enhance cleanup
+        .onDisappear {
+            print("📱 FeedVideoView disappeared - pausing player")
+            playerHolder.player?.pause()
+        }
     }
     
     private func loadVideo() {
         Task {
-            print("🎥 Starting to load video for index \(index)")
-            if let cachedURL = viewModel.videoURLCache[project.videoFileId] {
-                print("📎 Using cached URL for video \(index)")
-                await setupPlayer(with: cachedURL, index: index)
-            } else {
-                do {
-                    print("📥 Fetching URL for video \(index)")
-                    let url = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileId)
-                    viewModel.cacheVideoURL(url, for: project.videoFileId)
-                    await setupPlayer(with: url, index: index)
-                } catch {
-                    print("❌ Error loading video URL: \(error)")
+            do {
+                print("🎥 Loading video for index \(index)")
+                let url = try await viewModel.getVideoURL(for: project.videoFileId)
+                await setupPlayer(with: url, index: index)
+                if isActive {
+                    playerHolder.player?.play()
                 }
+            } catch {
+                print("❌ Error loading video: \(error)")
             }
         }
     }
     
     private func setupPlayer(with url: URL, index: Int) async {
-        print("🎬 Setting up player for video \(index)")
-        let player = AVPlayer(url: url)
-        // Prevent blocking main thread with synchronous loading
-        player.automaticallyWaitsToMinimizeStalling = false
-        player.actionAtItemEnd = .none
+        print("🎬 Setting up player \(index) with URL: \(url.absoluteString)")
         
-        NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: player.currentItem,
-            queue: .main
-        ) { _ in
-            player.seek(to: .zero)
-            player.play()
-        }
-        
-        await MainActor.run {
-            viewModel.players[index] = player
-            playerHolder.player = player
-            if isActive {
-                print("▶️ Auto-playing video \(index)")
-                player.play()
+        // Create asset and check if it's playable
+        let asset = AVURLAsset(url: url)
+        do {
+            let item = AVPlayerItem(asset: asset)
+            // Wait for item to be ready to play
+            let status = try await item.asset.load(.isPlayable)
+            guard status else {
+                print("❌ Asset is not playable for index \(index)")
+                return
             }
+            
+            let player = AVPlayer(playerItem: item)
+            player.automaticallyWaitsToMinimizeStalling = false
+            player.actionAtItemEnd = .none
+            
+            // Add observer for player item status
+            let observation = item.observe(\.status) { item, _ in
+                print("🔄 Player \(index) status changed to: \(item.status.rawValue)")
+            }
+            
+            // Store observation to prevent it from being deallocated
+            objc_setAssociatedObject(player, "statusObservation", observation, .OBJC_ASSOCIATION_RETAIN)
+            
+            await MainActor.run {
+                viewModel.players[index] = player
+                playerHolder.player = player
+                if isActive {
+                    print("▶️ Auto-playing video \(index)")
+                    player.play()
+                }
+            }
+        } catch {
+            print("❌ Error setting up player: \(error)")
         }
+    }
+    
+    private func handleSingleTap() {
+        isPlaying.toggle()
+        if isPlaying {
+            playerHolder.player?.play()
+        } else {
+            playerHolder.player?.pause()
+        }
+    }
+    
+    private func handleDoubleTap() {
+        showCoinAnimation = true
+        handleLike()
+        
+        // Play haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
+        // Hide animation after delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showCoinAnimation = false
+        }
+    }
+    
+    private func handleLike() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+            isLiked.toggle()
+        }
+        
+        // Play haptic feedback for better feedback
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
+        // TODO: Implement like functionality with backend
     }
 }
 
+// Update PlayerHolder to enhance cleanup
 class PlayerHolder: ObservableObject {
     @Published var player: AVPlayer?
     
     deinit {
+        print("🗑️ PlayerHolder being deinitialized")
+        cleanup()
+    }
+    
+    func cleanup() {
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil
@@ -373,18 +621,15 @@ struct ActionButton: View {
     
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
+            VStack(spacing: 3) {
                 Image(systemName: icon)
-                    .font(.system(size: 30))
+                    .font(.system(size: 35))
                     .foregroundColor(iconColor)
-                    .padding(10)
-                    .background(Circle().fill(Color.black.opacity(0.6)))
-                    .overlay(Circle().stroke(Color.white, lineWidth: 1))
-                    .shadow(color: .black.opacity(0.5), radius: 3, x: 0, y: 2)
+                
                 if let text = text {
                     Text(text)
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white)
-                        .font(.footnote)
                 }
             }
         }
@@ -447,6 +692,73 @@ struct ViewOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value += nextValue()
+    }
+}
+
+// Update CoinAnimation for better visual effect
+struct CoinAnimation: View {
+    @Binding var isVisible: Bool
+    let position: CGPoint
+    
+    var body: some View {
+        ZStack {
+            ForEach(0..<8) { index in
+                CoinParticle(
+                    index: index,
+                    isVisible: isVisible,
+                    position: position
+                )
+            }
+        }
+    }
+}
+
+struct CoinParticle: View {
+    let index: Int
+    let isVisible: Bool
+    let position: CGPoint
+    @State private var offset: CGSize = .zero
+    @State private var scale: CGFloat = 0
+    @State private var opacity: Double = 0
+    @State private var rotation: Double = 0
+    
+    var body: some View {
+        Image(systemName: "dollarsign.circle.fill")
+            .font(.system(size: 40))
+            .foregroundStyle(Color.brandPrimary)
+            .scaleEffect(scale)
+            .opacity(opacity)
+            .offset(offset)
+            .rotationEffect(.degrees(rotation))
+            .position(x: position.x, y: position.y)
+            .onAppear {
+                if isVisible {
+                    let startAngle = Double.random(in: -30...30)
+                    let distance = CGFloat.random(in: 100...200)
+                    
+                    withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                        scale = 1
+                        opacity = 1
+                        rotation = Double.random(in: -360...360)
+                        // Initial burst upward
+                        offset = CGSize(
+                            width: cos(startAngle * .pi / 180) * 20,
+                            height: -20
+                        )
+                    }
+                    
+                    // Fall down with physics-like motion
+                    withAnimation(.easeIn(duration: 0.7).delay(0.1)) {
+                        offset = CGSize(
+                            width: cos(startAngle * .pi / 180) * distance,
+                            height: distance // Positive for downward movement
+                        )
+                        opacity = 0
+                        scale = 0.5
+                        rotation += Double.random(in: 180...360)
+                    }
+                }
+            }
     }
 }
 

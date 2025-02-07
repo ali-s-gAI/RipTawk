@@ -54,7 +54,9 @@ struct RipTawkApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTabView()
+                .configureNavigationBar()
+                .accentColor(.brandPrimary)
         }
     }
 }

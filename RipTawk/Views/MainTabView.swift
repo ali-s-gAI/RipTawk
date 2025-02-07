@@ -12,9 +12,17 @@ struct MainTabView: View {
     @State private var selectedTab = 0
     
     init() {
-        // Set the tab bar appearance
+        // Set the tab bar appearance with brand color
         let appearance = UITabBarAppearance()
         appearance.configureWithDefaultBackground()
+        appearance.backgroundColor = UIColor(Color.brandBackground)
+        
+        // Configure selected item appearance
+        appearance.stackedLayoutAppearance.selected.iconColor = UIColor(Color.brandPrimary)
+        appearance.stackedLayoutAppearance.selected.titleTextAttributes = [
+            .foregroundColor: UIColor(Color.brandPrimary)
+        ]
+        
         UITabBar.appearance().scrollEdgeAppearance = appearance
         UITabBar.appearance().standardAppearance = appearance
     }
@@ -51,7 +59,7 @@ struct MainTabView: View {
                 }
                 .tag(4)
         }
-        .tint(.blue) // Set the tint color for selected items
+        .tint(Color.brandPrimary) // Set the tint color for selected items
     }
 }
 
