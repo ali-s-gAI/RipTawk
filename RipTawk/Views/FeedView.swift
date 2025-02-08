@@ -39,7 +39,7 @@ struct FeedView: View {
         }
         .scrollPosition(id: $scrollPosition)
         .scrollTargetBehavior(.paging)
-        .ignoresSafeArea()
+        .ignoresSafeArea(.container, edges: [.top, .leading, .trailing])
         .background(.black)
         .onChange(of: scrollPosition) { _, newPosition in
             handleScrollPositionChange(newPosition)
@@ -657,7 +657,7 @@ struct CustomVideoPlayer: UIViewControllerRepresentable {
         let controller = AVPlayerViewController()
         controller.player = player
         controller.showsPlaybackControls = false
-        controller.videoGravity = .resizeAspect
+        controller.videoGravity = .resizeAspectFill
         return controller
     }
     
