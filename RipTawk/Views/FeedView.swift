@@ -12,14 +12,37 @@ import AVKit
 
 struct FeedView: View {
     @StateObject private var viewModel = FeedViewModel()
-    @State private var currentIndex = 0
+    @State private var scrollPosition: String?
+    @State private var currentPlayer: AVPlayer?
     @Environment(\.scenePhase) private var scenePhase
     
     init() {}  // Remove UITabBar appearance configuration
     
     var body: some View {
-        GeometryReader { geometry in
-            feedContent(geometry)
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(viewModel.projects) { project in
+                    FeedVideoView(
+                        project: project,
+                        isActive: scrollPosition == project.id,
+                        viewModel: viewModel,
+                        player: currentPlayer
+                    )
+                    .id(project.id)
+                    .containerRelativeFrame([.horizontal, .vertical])
+                    .onAppear {
+                        playInitialVideoIfNecessary(project: project)
+                    }
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollPosition(id: $scrollPosition)
+        .scrollTargetBehavior(.paging)
+        .ignoresSafeArea()
+        .background(.black)
+        .onChange(of: scrollPosition) { _, newPosition in
+            handleScrollPositionChange(newPosition)
         }
         .onAppear {
             Task {
@@ -27,48 +50,50 @@ struct FeedView: View {
             }
         }
         .onDisappear {
-            print("📱 FeedView disappeared - cleaning up players")
+            currentPlayer?.pause()
             viewModel.cleanupAllPlayers()
         }
         .onChange(of: scenePhase, handleScenePhaseChange)
     }
     
-    @ViewBuilder
-    private func feedContent(_ geometry: GeometryProxy) -> some View {
-        if viewModel.projects.isEmpty {
-            ProgressView("Loading videos...")
-        } else {
-            feedTabView(geometry)
-        }
-    }
-    
-    private func feedTabView(_ geometry: GeometryProxy) -> some View {
-        TabView(selection: $currentIndex) {
-            ForEach(viewModel.projects.indices, id: \.self) { index in
-                FeedVideoView(
-                    project: viewModel.projects[index],
-                    isActive: currentIndex == index,
-                    viewModel: viewModel,
-                    index: index
-                )
-                .frame(
-                    width: geometry.size.width,
-                    height: geometry.size.height
-                )
-                .tag(index)
-                .onAppear {
-                    print("📱 Video \(index) appeared in view")
-                    Task {
-                        await viewModel.preloadVideo(at: index + 1, currentIndex: currentIndex)
-                    }
+    private func playInitialVideoIfNecessary(project: VideoProject) {
+        guard 
+            scrollPosition == nil,
+            currentPlayer == nil,
+            let firstProject = viewModel.projects.first,
+            firstProject.id == project.id
+        else { return }
+        
+        Task {
+            if let url = try? await viewModel.getVideoURL(for: project.videoFileId) {
+                await MainActor.run {
+                    let player = AVPlayer(url: url)
+                    player.actionAtItemEnd = .none
+                    player.automaticallyWaitsToMinimizeStalling = false
+                    currentPlayer = player
+                    player.play()
                 }
             }
         }
-        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-        .ignoresSafeArea()
-        .onChange(of: currentIndex) { oldIndex, newIndex in
-            viewModel.pausePlayer(for: oldIndex)
-            viewModel.playPlayer(for: newIndex)
+    }
+    
+    private func handleScrollPositionChange(_ position: String?) {
+        guard 
+            let position = position,
+            let project = viewModel.projects.first(where: { $0.id == position })
+        else { return }
+        
+        Task {
+            if let url = try? await viewModel.getVideoURL(for: project.videoFileId) {
+                await MainActor.run {
+                    currentPlayer?.pause()
+                    let player = AVPlayer(url: url)
+                    player.actionAtItemEnd = .none
+                    player.automaticallyWaitsToMinimizeStalling = false
+                    currentPlayer = player
+                    player.play()
+                }
+            }
         }
     }
     
@@ -76,16 +101,16 @@ struct FeedView: View {
         switch newPhase {
         case .inactive, .background:
             print("📱 App entering background - pausing playback")
-            viewModel.pausePlayer(for: currentIndex)
+            currentPlayer?.pause()
             viewModel.cleanupAllPlayers()
         case .active:
             print("📱 App becoming active")
-            if viewModel.players.isEmpty {
+            if currentPlayer == nil {
                 Task {
-                    await viewModel.preloadVideo(at: currentIndex, currentIndex: currentIndex)
+                    await viewModel.preloadVideo(at: 0, currentIndex: 0)
                 }
             }
-            viewModel.playPlayer(for: currentIndex)
+            currentPlayer?.play()
         @unknown default:
             break
         }
@@ -108,8 +133,8 @@ struct FeedView: View {
 class FeedViewModel: ObservableObject {
     @Published var projects: [VideoProject] = []
     var videoURLCache: [String: URL] = [:]
-    var players: [Int: AVPlayer] = [:]
-    var preloadedIndices = Set<Int>()
+    var players: [String: AVPlayer] = [:]
+    var preloadedIndices = Set<String>()
     
     // Keep these private
     private var activeDownloads: Set<String> = []
@@ -135,7 +160,7 @@ class FeedViewModel: ObservableObject {
     
     func preloadVideo(at index: Int, currentIndex: Int) async {
         guard index < projects.count,
-              !preloadedIndices.contains(index) else {
+              !preloadedIndices.contains(projects[index].id) else {
             print("⏭️ Skipping preload - already loaded or invalid index")
             return
         }
@@ -148,7 +173,7 @@ class FeedViewModel: ObservableObject {
             videoURLCache[project.videoFileId] = url
             
             // Create and prepare player in background
-            if players[index] == nil {
+            if players[project.id] == nil {
                 let player = AVPlayer(url: url)
                 player.automaticallyWaitsToMinimizeStalling = false
                 
@@ -162,8 +187,8 @@ class FeedViewModel: ObservableObject {
                     try? await asset.load(.duration, .tracks)
                 }
                 
-                players[index] = player
-                preloadedIndices.insert(index)
+                players[project.id] = player
+                preloadedIndices.insert(project.id)
                 print("✅ Player created and preloaded for index \(index)")
             }
             
@@ -199,7 +224,7 @@ class FeedViewModel: ObservableObject {
     }
     
     func pausePlayer(for index: Int) {
-        players[index]?.pause()
+        players[projects[index].id]?.pause()
     }
     
     func playPlayer(for index: Int) {
@@ -209,7 +234,7 @@ class FeedViewModel: ObservableObject {
             player.seek(to: .zero)
         }
         // Then play the current one
-        if let player = players[index] {
+        if let player = players[projects[index].id] {
             player.seek(to: .zero)
             player.play()
         }
@@ -312,7 +337,8 @@ struct FeedVideoView: View {
     let project: VideoProject
     let isActive: Bool
     let viewModel: FeedViewModel
-    let index: Int
+    let player: AVPlayer?
+    @State private var editProject: VideoProject? = nil
     @StateObject private var playerHolder = PlayerHolder()
     @State private var isLiked = false
     @State private var isPlaying = true
@@ -320,6 +346,7 @@ struct FeedVideoView: View {
     @State private var lastTapPosition: CGPoint = .zero
     @State private var lastTapTime: Date = Date()
     @State private var tapCount = 0
+    @State private var showVideoEditor = false
     
     // Reset state when video becomes inactive
     private func handleInactiveState() {
@@ -329,134 +356,126 @@ struct FeedVideoView: View {
     }
     
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                if let player = playerHolder.player {
-                    CustomVideoPlayer(player: player)
-                        // Fill screen while maintaining aspect ratio
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
-                        .background(Color.black)
-                        .ignoresSafeArea()
-                } else {
-                    Color.black.ignoresSafeArea()
-                    ProgressView("Loading video...")
-                    .onAppear {
-                        // Force load video if player is nil
-                        loadVideo()
-                    }
-                }
-                
-                // Replace the existing gesture overlay with this:
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { location in
-                        let now = Date()
-                        let timeSinceLastTap = now.timeIntervalSince(lastTapTime)
-                        
-                        if timeSinceLastTap < 0.3 {
-                            // Double tap detected
-                            tapCount = 0
-                            lastTapPosition = location
-                            handleDoubleTap()
-                        } else {
-                            // Potential single tap
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                if tapCount == 1 {
-                                    handleSingleTap()
-                                }
-                                tapCount = 0
-                            }
-                            tapCount += 1
-                        }
-                        lastTapTime = now
-                    }
-                
-                // Play button
-                if !isPlaying {
-                    Circle()
-                        .fill(.black.opacity(0.6))
-                        .frame(width: 80, height: 80)
-                        .overlay(
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 40))
-                                .foregroundColor(.white)
-                        )
-                        .transition(.scale.combined(with: .opacity))
-                }
-                
-                // Coin animation
-                if showCoinAnimation {
-                    CoinAnimation(
-                        isVisible: $showCoinAnimation,
-                        position: lastTapPosition
-                    )
-                }
-                
-                // UI Overlay
-                VStack {
-                    Spacer()
+        ZStack {
+            if let player = player {
+                CustomVideoPlayer(player: player)
+                    .containerRelativeFrame([.horizontal, .vertical])
+            } else {
+                Color.black
+                    .containerRelativeFrame([.horizontal, .vertical])
+                ProgressView("Loading video...")
+            }
+            
+            // Expanded tap area
+            Color.clear
+                .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
+                .contentShape(Rectangle())
+                .ignoresSafeArea(edges: .all)
+                .onTapGesture { location in
+                    let now = Date()
+                    let timeSinceLastTap = now.timeIntervalSince(lastTapTime)
                     
-                    HStack(alignment: .bottom) {
-                        // Video info on the left
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Author: \(project.userId)")
-                                .font(.headline)
-                            Text(project.title)
-                                .font(.subheadline)
-                            Text("Video description...")
-                                .font(.body)
+                    if timeSinceLastTap < 0.3 {
+                        // Double tap detected
+                        tapCount = 0
+                        lastTapPosition = location
+                        handleDoubleTap()
+                    } else {
+                        // Potential single tap
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            if tapCount == 1 {
+                                handleSingleTap()
+                            }
+                            tapCount = 0
                         }
-                        .foregroundColor(.white)
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        // Updated action buttons
-                        VStack(spacing: 28) {
-                            ActionButton(
-                                icon: isLiked ? "chart.line.uptrend.xyaxis.circle.fill" : "chart.line.uptrend.xyaxis",
-                                text: isLiked ? "1" : "0",
-                                action: { handleLike() },
-                                iconColor: isLiked ? Color.brandPrimary : .white
-                            )
-                            
-                            ActionButton(
-                                icon: "bubble.right",
-                                text: "0",
-                                action: {
-                                    // Implement comment action
-                                }
-                            )
-                            
-                            ActionButton(
-                                icon: "arrowshape.turn.up.forward",
-                                text: "Share",
-                                action: {
-                                    // Implement share action
-                                }
-                            )
-                            
-                            ActionButton(
-                                icon: "dollarsign.circle",
-                                text: "Tip",
-                                action: {
-                                    // Implement tips/monetization
-                                }
-                            )
-                        }
-                        .padding(.bottom, 20)
-                        .padding(.trailing, 8)
+                        tapCount += 1
                     }
-                    .padding(.bottom, 50)
-                    .background(
-                        LinearGradient(
-                            gradient: Gradient(colors: [.clear, .black.opacity(0.7)]),
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                    lastTapTime = now
                 }
+            
+            // Play button
+            if !isPlaying {
+                Circle()
+                    .fill(.black.opacity(0.6))
+                    .frame(width: 80, height: 80)
+                    .overlay(
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(.white)
+                    )
+                    .transition(.scale.combined(with: .opacity))
+            }
+            
+            // Coin animation
+            if showCoinAnimation {
+                CoinAnimation(
+                    isVisible: $showCoinAnimation,
+                    position: lastTapPosition
+                )
+            }
+            
+            // UI Overlay
+            VStack {
+                Spacer()
+                
+                HStack(alignment: .bottom) {
+                    // Video info on the left
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Author: \(project.userId)")
+                            .font(.appHeadline())
+                        Text(project.title)
+                            .font(.appBody())
+                        Text("Video description...")
+                            .font(.appCaption())
+                    }
+                    .foregroundColor(.white)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    // Updated action buttons
+                    VStack(spacing: 28) {
+                        ActionButton(
+                            icon: isLiked ? "chart.line.uptrend.xyaxis.circle.fill" : "chart.line.uptrend.xyaxis",
+                            text: isLiked ? "1" : "0",
+                            action: { handleLike() },
+                            iconColor: isLiked ? Color.brandPrimary : .white
+                        )
+                        
+                        ActionButton(
+                            icon: "bubble.right",
+                            text: "0",
+                            action: {
+                                // Implement comment action
+                            }
+                        )
+                        
+                        ActionButton(
+                            icon: "arrowshape.turn.up.forward",
+                            text: "Share",
+                            action: {
+                                // Implement share action
+                            }
+                        )
+                        
+                        ActionButton(
+                            icon: "square.and.pencil",
+                            text: "Edit",
+                            action: {
+                                handleEdit()
+                            }
+                        )
+                    }
+                    .padding(.bottom, 20)
+                    .padding(.trailing, 8)
+                }
+                .padding(.bottom, 50)
+                .background(
+                    LinearGradient(
+                        gradient: Gradient(colors: [.clear, .black.opacity(0.7)]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
             }
         }
         .onChange(of: isActive) { _, newValue in
@@ -487,14 +506,33 @@ struct FeedVideoView: View {
             print("📱 FeedVideoView disappeared - pausing player")
             playerHolder.player?.pause()
         }
+        // Replace the existing sheet with fullScreenCover
+        .fullScreenCover(isPresented: $showVideoEditor) {
+            if let videoURL = viewModel.videoURLCache[project.videoFileId] {
+                VideoEditorSwiftUIView(video: nil, existingProject: project)
+                    .overlay(alignment: .topLeading) {
+                        Button {
+                            showVideoEditor = false
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                                .padding(12)
+                                .background(Color.black.opacity(0.5))
+                                .clipShape(Circle())
+                                .padding()
+                        }
+                    }
+            }
+        }
     }
     
     private func loadVideo() {
         Task {
             do {
-                print("🎥 Loading video for index \(index)")
+                print("🎥 Loading video for project \(project.id)")
                 let url = try await viewModel.getVideoURL(for: project.videoFileId)
-                await setupPlayer(with: url, index: index)
+                await setupPlayer(with: url, projectId: project.id)
                 if isActive {
                     playerHolder.player?.play()
                 }
@@ -504,17 +542,15 @@ struct FeedVideoView: View {
         }
     }
     
-    private func setupPlayer(with url: URL, index: Int) async {
-        print("🎬 Setting up player \(index) with URL: \(url.absoluteString)")
+    private func setupPlayer(with url: URL, projectId: String) async {
+        print("🎬 Setting up player for project \(projectId) with URL: \(url.absoluteString)")
         
-        // Create asset and check if it's playable
         let asset = AVURLAsset(url: url)
         do {
             let item = AVPlayerItem(asset: asset)
-            // Wait for item to be ready to play
             let status = try await item.asset.load(.isPlayable)
             guard status else {
-                print("❌ Asset is not playable for index \(index)")
+                print("❌ Asset is not playable for project \(projectId)")
                 return
             }
             
@@ -522,19 +558,17 @@ struct FeedVideoView: View {
             player.automaticallyWaitsToMinimizeStalling = false
             player.actionAtItemEnd = .none
             
-            // Add observer for player item status
-            let observation = item.observe(\.status) { item, _ in
-                print("🔄 Player \(index) status changed to: \(item.status.rawValue)")
+            // New: Loop the video
+            NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
+                player.seek(to: .zero)
+                player.play()
             }
             
-            // Store observation to prevent it from being deallocated
-            objc_setAssociatedObject(player, "statusObservation", observation, .OBJC_ASSOCIATION_RETAIN)
-            
             await MainActor.run {
-                viewModel.players[index] = player
+                viewModel.players[projectId] = player
                 playerHolder.player = player
                 if isActive {
-                    print("▶️ Auto-playing video \(index)")
+                    print("▶️ Auto-playing video \(projectId)")
                     player.play()
                 }
             }
@@ -576,6 +610,26 @@ struct FeedVideoView: View {
         generator.impactOccurred()
         
         // TODO: Implement like functionality with backend
+    }
+    
+    private func handleEdit() {
+        // Check if we have the video URL cached
+        if viewModel.videoURLCache[project.videoFileId] != nil {
+            showVideoEditor = true
+        } else {
+            // If URL not cached, load it first
+            Task {
+                do {
+                    _ = try await viewModel.getVideoURL(for: project.videoFileId)
+                    await MainActor.run {
+                        showVideoEditor = true
+                    }
+                } catch {
+                    print("❌ Error loading video for editing: \(error)")
+                    // You might want to show an error alert here
+                }
+            }
+        }
     }
 }
 
@@ -628,7 +682,7 @@ struct ActionButton: View {
                 
                 if let text = text {
                     Text(text)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.appCaption())
                         .foregroundColor(.white)
                 }
             }

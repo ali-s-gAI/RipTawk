@@ -8,10 +8,53 @@
 import SwiftUI
 
 struct DiscoverView: View {
+    init() {
+        // Debug: Print all available fonts
+        for family in UIFont.familyNames.sorted() {
+            print("👉 Font Family: \(family)")
+            for name in UIFont.fontNames(forFamilyName: family) {
+                print("   - \(name)")
+            }
+        }
+        
+        // Debug: Print bundle contents
+        if let bundlePath = Bundle.main.resourcePath {
+            print("\n📦 Bundle Contents:")
+            do {
+                let items = try FileManager.default.contentsOfDirectory(atPath: bundlePath)
+                for item in items where item.contains("Mono") {
+                    print("   - \(item)")
+                }
+            } catch {
+                print("❌ Error reading bundle: \(error)")
+            }
+        }
+    }
+    
     var body: some View {
         NavigationView {
-            Text("Discover View Coming Soon")
-                .navigationTitle("Discover")
+            VStack(spacing: 20) {
+                // Let's also try the font directly to test
+                Text("Direct Font Test")
+                    .font(.custom("Mono-Regular", size: 20))
+                    .foregroundColor(.blue)
+                
+                Text("Discover View Coming Soon")
+                    .font(.appTitle())
+                    .foregroundColor(.primary)
+                
+                Text("This is a headline")
+                    .font(.appHeadline())
+                    .foregroundColor(.secondary)
+                
+                Text("This is body text")
+                    .font(.appBody())
+                
+                Text("This is caption text")
+                    .font(.appCaption())
+                    .foregroundColor(.secondary)
+            }
+            .navigationTitle("Discover")
         }
     }
 }

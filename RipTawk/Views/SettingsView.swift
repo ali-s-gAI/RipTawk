@@ -9,46 +9,92 @@ import SwiftUI
 import Appwrite
 
 struct SettingsView: View {
-    @State private var notificationsEnabled = true
-    @State private var darkModeEnabled = false
-    @State private var autoSaveInterval = 5
-    @State private var selectedQuality = VideoQuality.high
+    @AppStorage("isDarkMode") private var isDarkMode: Bool?
+    @State private var username = ""
+    @State private var email = ""
+    @State private var showChangePassword = false
     @State private var showSignOutAlert = false
-
-    enum VideoQuality: String, CaseIterable, Identifiable {
-        case low, medium, high
-        var id: Self { self }
-    }
-
+    @State private var isEditingUsername = false
+    @State private var newUsername = ""
+    @State private var showError = false
+    @State private var errorMessage = ""
+    @State private var isClearingCache = false
+    
+    // Password change states
+    @State private var oldPassword = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    
     var body: some View {
         NavigationStack {
             Form {
-                // Account Section
-                Section(header: Text("Account")) {
-                    NavigationLink("Account Settings", destination: AccountSettingsView())
-                    NavigationLink("Subscription", destination: Text("Subscription Details"))
-                }
-                
-                // App Settings Section
-                Section(header: Text("App Settings")) {
-                    Toggle("Enable Notifications", isOn: $notificationsEnabled)
-                    Toggle("Dark Mode", isOn: $darkModeEnabled)
-                    Picker("Auto-Save Interval", selection: $autoSaveInterval) {
-                        Text("1 minute").tag(1)
-                        Text("5 minutes").tag(5)
-                        Text("10 minutes").tag(10)
-                    }
-                    Picker("Video Quality", selection: $selectedQuality) {
-                        ForEach(VideoQuality.allCases) { quality in
-                            Text(quality.rawValue.capitalized).tag(quality)
+                // Profile Section
+                Section {
+                    HStack {
+                        Text("Username")
+                        Spacer()
+                        if isEditingUsername {
+                            TextField("New username", text: $newUsername)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .submitLabel(.done)
+                                .onSubmit(updateUsername)
+                        } else {
+                            Text(username)
+                                .foregroundStyle(.secondary)
                         }
                     }
+                    .onTapGesture {
+                        if !isEditingUsername {
+                            newUsername = username
+                            isEditingUsername = true
+                        }
+                    }
+                    
+                    HStack {
+                        Text("Email")
+                        Spacer()
+                        Text(email)
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Button("Change Password") {
+                        showChangePassword = true
+                    }
+                } header: {
+                    Text("Profile")
                 }
                 
-                // Support Section
-                Section(header: Text("Support")) {
-                    NavigationLink("Help & Support", destination: Text("Help Center"))
-                    NavigationLink("About", destination: Text("About RipTawk"))
+                // Appearance Section
+                Section {
+                    Picker("Appearance", selection: .init(
+                        get: { isDarkMode },
+                        set: { newValue in
+                            isDarkMode = newValue
+                        }
+                    )) {
+                        Text("System").tag(Optional<Bool>.none)
+                        Text("Light").tag(Optional<Bool>.some(false))
+                        Text("Dark").tag(Optional<Bool>.some(true))
+                    }
+                } header: {
+                    Text("Appearance")
+                }
+                
+                // Cache Section
+                Section {
+                    Button(action: clearCache) {
+                        HStack {
+                            Text("Clear Cache")
+                            Spacer()
+                            if isClearingCache {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isClearingCache)
+                } header: {
+                    Text("Storage")
                 }
                 
                 // Sign Out Section
@@ -56,11 +102,21 @@ struct SettingsView: View {
                     Button(role: .destructive) {
                         showSignOutAlert = true
                     } label: {
-                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                        HStack {
+                            Spacer()
+                            Text("Sign Out")
+                            Spacer()
+                        }
                     }
                 }
             }
             .navigationTitle("Settings")
+            .onAppear(perform: loadUserData)
+            .alert("Error", isPresented: $showError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(errorMessage)
+            }
             .alert("Sign Out", isPresented: $showSignOutAlert) {
                 Button("Cancel", role: .cancel) { }
                 Button("Sign Out", role: .destructive) {
@@ -69,16 +125,131 @@ struct SettingsView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
+            .sheet(isPresented: $showChangePassword) {
+                changePasswordView
+            }
+        }
+    }
+    
+    private var changePasswordView: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    SecureField("Current Password", text: $oldPassword)
+                    SecureField("New Password", text: $newPassword)
+                    SecureField("Confirm New Password", text: $confirmPassword)
+                }
+                
+                Section {
+                    Button("Update Password") {
+                        updatePassword()
+                    }
+                    .disabled(oldPassword.isEmpty || newPassword.isEmpty || newPassword != confirmPassword)
+                }
+            }
+            .navigationTitle("Change Password")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        showChangePassword = false
+                    }
+                }
+            }
+        }
+    }
+    
+    private func loadUserData() {
+        Task {
+            do {
+                let account = try await AppwriteService.shared.account.get()
+                await MainActor.run {
+                    username = account.name
+                    email = account.email
+                    print("👤 [SETTINGS] Loaded user data - Name: \(username), Email: \(email)")
+                }
+            } catch {
+                print("❌ [SETTINGS] Failed to load user data: \(error.localizedDescription)")
+                errorMessage = "Failed to load user data"
+                showError = true
+            }
+        }
+    }
+    
+    private func updateUsername() {
+        guard !newUsername.isEmpty, newUsername != username else {
+            isEditingUsername = false
+            return
+        }
+        
+        Task {
+            do {
+                let account = try await AppwriteService.shared.account.updateName(name: newUsername)
+                await MainActor.run {
+                    username = account.name
+                    isEditingUsername = false
+                    print("✅ [SETTINGS] Updated username to: \(username)")
+                }
+            } catch {
+                print("❌ [SETTINGS] Failed to update username: \(error.localizedDescription)")
+                errorMessage = "Failed to update username"
+                showError = true
+                isEditingUsername = false
+            }
+        }
+    }
+    
+    private func updatePassword() {
+        Task {
+            do {
+                try await AppwriteService.shared.account.updatePassword(
+                    password: newPassword,
+                    oldPassword: oldPassword
+                )
+                await MainActor.run {
+                    showChangePassword = false
+                    oldPassword = ""
+                    newPassword = ""
+                    confirmPassword = ""
+                    print("✅ [SETTINGS] Password updated successfully")
+                }
+            } catch {
+                print("❌ [SETTINGS] Failed to update password: \(error.localizedDescription)")
+                errorMessage = "Failed to update password"
+                showError = true
+            }
+        }
+    }
+    
+    private func clearCache() {
+        Task {
+            await MainActor.run { isClearingCache = true }
+            do {
+                // Clear video cache
+                if let cachePath = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("videoCache") {
+                    try FileManager.default.removeItem(at: cachePath)
+                    try FileManager.default.createDirectory(at: cachePath, withIntermediateDirectories: true)
+                }
+                print("✅ [SETTINGS] Cache cleared successfully")
+            } catch {
+                print("❌ [SETTINGS] Failed to clear cache: \(error.localizedDescription)")
+                errorMessage = "Failed to clear cache"
+                showError = true
+            }
+            await MainActor.run { isClearingCache = false }
         }
     }
     
     private func signOut() {
         Task {
             do {
-                try await AppwriteService.shared.account.deleteSession(sessionId: "current")
+                try await AppwriteService.shared.signOut()
+                print("✅ [SETTINGS] User signed out successfully")
                 NotificationCenter.default.post(name: .userDidSignOut, object: nil)
             } catch {
-                print("Sign out error: \(error.localizedDescription)")
+                print("❌ [SETTINGS] Sign out error: \(error.localizedDescription)")
+                errorMessage = "Failed to sign out"
+                showError = true
             }
         }
     }

@@ -23,6 +23,12 @@ struct MainTabView: View {
             .foregroundColor: UIColor(Color.brandPrimary)
         ]
         
+        // Configure unselected item appearance
+        appearance.stackedLayoutAppearance.normal.iconColor = UIColor(Color.brandSecondary)
+        appearance.stackedLayoutAppearance.normal.titleTextAttributes = [
+            .foregroundColor: UIColor(Color.brandSecondary)
+        ]
+        
         UITabBar.appearance().scrollEdgeAppearance = appearance
         UITabBar.appearance().standardAppearance = appearance
     }
@@ -60,10 +66,21 @@ struct MainTabView: View {
                 .tag(4)
         }
         .tint(Color.brandPrimary) // Set the tint color for selected items
+        .onAppear {
+            print(" [AUTH] MainTabView appeared - verifying authentication...")
+            Task {
+                do {
+                    try await AppwriteService.shared.initializeSession()
+                    print(" [AUTH] MainTabView - Session verified")
+                } catch {
+                    print(" [AUTH] MainTabView - Invalid session, posting sign out notification")
+                    NotificationCenter.default.post(name: .userDidSignOut, object: nil)
+                }
+            }
+        }
     }
 }
 
 #Preview {
     MainTabView()
 }
-

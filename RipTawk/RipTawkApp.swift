@@ -10,6 +10,8 @@ import VideoEditorSDK
 
 @main
 struct RipTawkApp: App {
+    @StateObject private var authState = AuthState()
+    
     init() {
         // Initialize VideoEditorSDK license
         let possiblePaths = [
@@ -54,9 +56,40 @@ struct RipTawkApp: App {
     
     var body: some Scene {
         WindowGroup {
-            MainTabView()
-                .configureNavigationBar()
-                .accentColor(.brandPrimary)
+            Group {
+                if authState.isInitializing {
+                    ProgressView("Loading...")
+                } else if authState.isAuthenticated {
+                    ContentView(isAuthenticated: true)
+                } else {
+                    ContentView(isAuthenticated: false)
+                }
+            }
+            .task {
+                await authState.checkSession()
+            }
         }
+    }
+}
+
+@MainActor
+class AuthState: ObservableObject {
+    @Published var isAuthenticated = false
+    @Published var isInitializing = true
+    
+    func checkSession() async {
+        print("🔐 [APP] Checking authentication status...")
+        isInitializing = true
+        
+        do {
+            try await AppwriteService.shared.initializeSession()
+            print("✅ [APP] User is authenticated")
+            isAuthenticated = true
+        } catch {
+            print("❌ [APP] No valid session: \(error.localizedDescription)")
+            isAuthenticated = false
+        }
+        
+        isInitializing = false
     }
 }

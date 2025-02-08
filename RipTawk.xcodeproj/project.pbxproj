@@ -10,6 +10,9 @@
 		35566F552D51B3B900682139 /* Appwrite in Frameworks */ = {isa = PBXBuildFile; productRef = 35566F542D51B3B900682139 /* Appwrite */; };
 		359350022D52AF2A00374E2F /* VideoEditorSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 359350012D52AF2A00374E2F /* VideoEditorSDK */; };
 		359350062D52B24200374E2F /* license in Resources */ = {isa = PBXBuildFile; fileRef = 359350052D52B24200374E2F /* license */; };
+		35F2D88F2D57F172005FDB93 /* ' Mono Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 35F2D8892D57F136005FDB93 /* ' Mono Bold.ttf */; };
+		35F2D8902D57F172005FDB93 /* ' Mono Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 35F2D88A2D57F136005FDB93 /* ' Mono Light.ttf */; };
+		35F2D8912D57F172005FDB93 /* ' Mono Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 35F2D88B2D57F136005FDB93 /* ' Mono Regular.ttf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -34,6 +37,9 @@
 		35566F162D516C4200682139 /* RipTawkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RipTawkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		35566F202D516C4200682139 /* RipTawkUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RipTawkUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		359350052D52B24200374E2F /* license */ = {isa = PBXFileReference; lastKnownFileType = text; name = license; path = RipTawk/license; sourceTree = "<group>"; };
+		35F2D8892D57F136005FDB93 /* ' Mono Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "' Mono Bold.ttf"; sourceTree = "<group>"; };
+		35F2D88A2D57F136005FDB93 /* ' Mono Light.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "' Mono Light.ttf"; sourceTree = "<group>"; };
+		35F2D88B2D57F136005FDB93 /* ' Mono Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "' Mono Regular.ttf"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -97,6 +103,7 @@
 		35566EFD2D516C4000682139 = {
 			isa = PBXGroup;
 			children = (
+				35F2D8812D57E04A005FDB93 /* Fonts */,
 				359350052D52B24200374E2F /* license */,
 				35566F082D516C4000682139 /* RipTawk */,
 				35566F192D516C4200682139 /* RipTawkTests */,
@@ -121,6 +128,16 @@
 			children = (
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		35F2D8812D57E04A005FDB93 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				35F2D8892D57F136005FDB93 /* ' Mono Bold.ttf */,
+				35F2D88A2D57F136005FDB93 /* ' Mono Light.ttf */,
+				35F2D88B2D57F136005FDB93 /* ' Mono Regular.ttf */,
+			);
+			path = Fonts;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -249,6 +266,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				35F2D88F2D57F172005FDB93 /* ' Mono Bold.ttf in Resources */,
+				35F2D8902D57F172005FDB93 /* ' Mono Light.ttf in Resources */,
+				35F2D8912D57F172005FDB93 /* ' Mono Regular.ttf in Resources */,
 				359350062D52B24200374E2F /* license in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

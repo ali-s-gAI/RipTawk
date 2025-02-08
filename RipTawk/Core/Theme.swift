@@ -1,9 +1,9 @@
 import SwiftUI
 
 extension Color {
-    static let brandPrimary = Color(hex: "08752A")
-    static let brandSecondary = Color(hex: "08752A").opacity(0.8)
-    static let brandBackground = Color(hex: "08752A").opacity(0.1)
+    static let brandPrimary = Color(hex: "123524")
+    static let brandSecondary = Color(hex: "123524").opacity(0.8)
+    static let brandBackground = Color(hex: "123524").opacity(0.1)
     
     // Semantic colors for specific uses
     static let brandAction = Color.brandPrimary

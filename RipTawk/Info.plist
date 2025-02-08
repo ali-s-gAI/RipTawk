@@ -12,5 +12,11 @@
 	<string>RipTawk needs access to save and load your videos.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>RipTawk needs access to save your recorded videos.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Mono Regular.ttf</string>
+		<string>Mono Bold.ttf</string>
+		<string>Mono Light.ttf</string>
+	</array>
 </dict>
 </plist>
