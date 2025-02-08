@@ -13,7 +13,6 @@ import AVKit
 struct FeedView: View {
     @StateObject private var viewModel = FeedViewModel()
     @State private var scrollPosition: String?
-    @State private var currentPlayer: AVPlayer?
     @Environment(\.scenePhase) private var scenePhase
     
     init() {}  // Remove UITabBar appearance configuration
@@ -25,92 +24,37 @@ struct FeedView: View {
                     FeedVideoView(
                         project: project,
                         isActive: scrollPosition == project.id,
-                        viewModel: viewModel,
-                        player: currentPlayer
+                        viewModel: viewModel
                     )
                     .id(project.id)
                     .containerRelativeFrame([.horizontal, .vertical])
-                    .onAppear {
-                        playInitialVideoIfNecessary(project: project)
-                    }
                 }
             }
             .scrollTargetLayout()
         }
+        .scrollIndicators(.hidden)
         .scrollPosition(id: $scrollPosition)
         .scrollTargetBehavior(.paging)
         .ignoresSafeArea(.container, edges: [.top, .leading, .trailing])
         .background(.black)
-        .onChange(of: scrollPosition) { _, newPosition in
-            handleScrollPositionChange(newPosition)
-        }
         .onAppear {
             Task {
                 await viewModel.loadFeedVideos()
             }
         }
         .onDisappear {
-            currentPlayer?.pause()
             viewModel.cleanupAllPlayers()
         }
         .onChange(of: scenePhase, handleScenePhaseChange)
-    }
-    
-    private func playInitialVideoIfNecessary(project: VideoProject) {
-        guard 
-            scrollPosition == nil,
-            currentPlayer == nil,
-            let firstProject = viewModel.projects.first,
-            firstProject.id == project.id
-        else { return }
-        
-        Task {
-            if let url = try? await viewModel.getVideoURL(for: project.videoFileId) {
-                await MainActor.run {
-                    let player = AVPlayer(url: url)
-                    player.actionAtItemEnd = .none
-                    player.automaticallyWaitsToMinimizeStalling = false
-                    currentPlayer = player
-                    player.play()
-                }
-            }
-        }
-    }
-    
-    private func handleScrollPositionChange(_ position: String?) {
-        guard 
-            let position = position,
-            let project = viewModel.projects.first(where: { $0.id == position })
-        else { return }
-        
-        Task {
-            if let url = try? await viewModel.getVideoURL(for: project.videoFileId) {
-                await MainActor.run {
-                    currentPlayer?.pause()
-                    let player = AVPlayer(url: url)
-                    player.actionAtItemEnd = .none
-                    player.automaticallyWaitsToMinimizeStalling = false
-                    currentPlayer = player
-                    player.play()
-                }
-            }
-        }
     }
     
     private func handleScenePhaseChange(_ oldPhase: ScenePhase, _ newPhase: ScenePhase) {
         switch newPhase {
         case .inactive, .background:
             print("📱 App entering background - pausing playback")
-            currentPlayer?.pause()
             viewModel.cleanupAllPlayers()
         case .active:
             print("📱 App becoming active")
-            if currentPlayer == nil {
-                Task {
-                    await viewModel.preloadVideo(at: 0, currentIndex: 0)
-                }
-            }
-            currentPlayer?.play()
         @unknown default:
             break
         }
@@ -337,15 +281,12 @@ struct FeedVideoView: View {
     let project: VideoProject
     let isActive: Bool
     let viewModel: FeedViewModel
-    let player: AVPlayer?
     @State private var editProject: VideoProject? = nil
     @StateObject private var playerHolder = PlayerHolder()
     @State private var isLiked = false
     @State private var isPlaying = true
     @State private var showCoinAnimation = false
     @State private var lastTapPosition: CGPoint = .zero
-    @State private var lastTapTime: Date = Date()
-    @State private var tapCount = 0
     @State private var showVideoEditor = false
     
     // Reset state when video becomes inactive
@@ -357,8 +298,8 @@ struct FeedVideoView: View {
     
     var body: some View {
         ZStack {
-            if let player = player {
-                CustomVideoPlayer(player: player)
+            if let currentPlayer = playerHolder.player {
+                CustomVideoPlayer(player: currentPlayer)
                     .containerRelativeFrame([.horizontal, .vertical])
             } else {
                 Color.black
@@ -366,31 +307,28 @@ struct FeedVideoView: View {
                 ProgressView("Loading video...")
             }
             
-            // Expanded tap area
+            // Expanded tap area with updated gesture handling for single and double taps
             Color.clear
                 .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
                 .contentShape(Rectangle())
                 .ignoresSafeArea(edges: .all)
-                .onTapGesture { location in
-                    let now = Date()
-                    let timeSinceLastTap = now.timeIntervalSince(lastTapTime)
-                    
-                    if timeSinceLastTap < 0.3 {
-                        // Double tap detected
-                        tapCount = 0
-                        lastTapPosition = location
-                        handleDoubleTap()
-                    } else {
-                        // Potential single tap
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            if tapCount == 1 {
-                                handleSingleTap()
-                            }
-                            tapCount = 0
+                // Capture tap location using a drag gesture (minimumDistance: 0)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onEnded { value in
+                            lastTapPosition = value.location
                         }
-                        tapCount += 1
-                    }
-                    lastTapTime = now
+                )
+                // High priority double-tap gesture
+                .highPriorityGesture(
+                    TapGesture(count: 2)
+                        .onEnded {
+                            handleDoubleTap()
+                        }
+                )
+                // Single tap gesture for play/pause toggle
+                .onTapGesture {
+                    handleSingleTap()
                 }
             
             // Play button
@@ -481,14 +419,17 @@ struct FeedVideoView: View {
         .onChange(of: isActive) { _, newValue in
             if newValue {
                 if playerHolder.player == nil {
+                    print("onChange: Active and no player – loading video for project \(project.id)")
                     loadVideo()
                 } else {
+                    print("onChange: Active and player exists – restarting video for project \(project.id)")
                     playerHolder.player?.seek(to: .zero)
                     if isPlaying {
                         playerHolder.player?.play()
                     }
                 }
             } else {
+                print("onChange: Inactive – pausing video for project \(project.id)")
                 handleInactiveState()
             }
         }
@@ -503,8 +444,9 @@ struct FeedVideoView: View {
         }
         // Update FeedVideoView to enhance cleanup
         .onDisappear {
-            print("📱 FeedVideoView disappeared - pausing player")
+            print("📱 FeedVideoView disappeared - pausing and cleaning up player")
             playerHolder.player?.pause()
+            playerHolder.cleanup()
         }
         // Replace the existing sheet with fullScreenCover
         .fullScreenCover(isPresented: $showVideoEditor) {
@@ -554,18 +496,30 @@ struct FeedVideoView: View {
                 return
             }
             
+            // Remove any existing player and observers first
+            if let existingPlayer = playerHolder.player {
+                NotificationCenter.default.removeObserver(self, 
+                    name: .AVPlayerItemDidPlayToEndTime,
+                    object: existingPlayer.currentItem)
+                existingPlayer.pause()
+                existingPlayer.replaceCurrentItem(with: nil)
+            }
+            
             let player = AVPlayer(playerItem: item)
             player.automaticallyWaitsToMinimizeStalling = false
             player.actionAtItemEnd = .none
             
             // New: Loop the video
-            NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
-                player.seek(to: .zero)
-                player.play()
+            NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { [weak player] _ in
+                player?.seek(to: .zero)
+                player?.play()
             }
             
             await MainActor.run {
-                viewModel.players[projectId] = player
                 playerHolder.player = player
                 if isActive {
                     print("▶️ Auto-playing video \(projectId)")
@@ -579,14 +533,21 @@ struct FeedVideoView: View {
     
     private func handleSingleTap() {
         isPlaying.toggle()
-        if isPlaying {
-            playerHolder.player?.play()
+        if let currentPlayer = playerHolder.player {
+            print("handleSingleTap: isPlaying = \(isPlaying), player rate before: \(currentPlayer.rate), currentTime: \(CMTimeGetSeconds(currentPlayer.currentTime()))")
+            if isPlaying {
+                currentPlayer.play()
+            } else {
+                currentPlayer.pause()
+            }
+            print("handleSingleTap: player rate after: \(currentPlayer.rate)")
         } else {
-            playerHolder.player?.pause()
+            print("handleSingleTap: No player available")
         }
     }
     
     private func handleDoubleTap() {
+        print("handleDoubleTap: double tap received")
         showCoinAnimation = true
         handleLike()
         
@@ -596,7 +557,7 @@ struct FeedVideoView: View {
         
         // Hide animation after delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            showCoinAnimation = false
+            self.showCoinAnimation = false
         }
     }
     
@@ -643,6 +604,11 @@ class PlayerHolder: ObservableObject {
     }
     
     func cleanup() {
+        if let player = player {
+            NotificationCenter.default.removeObserver(self,
+                name: .AVPlayerItemDidPlayToEndTime,
+                object: player.currentItem)
+        }
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil
