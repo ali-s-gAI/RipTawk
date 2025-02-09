@@ -40,6 +40,12 @@ struct FeedView: View {
         .onAppear {
             Task {
                 await viewModel.loadFeedVideos()
+                // Set initial scroll position to first video
+                if let firstProjectId = viewModel.projects.first?.id {
+                    await MainActor.run {
+                        scrollPosition = firstProjectId
+                    }
+                }
             }
         }
         .onDisappear {
