@@ -580,6 +580,8 @@ struct FeedVideoView: View {
     }
     
     private func handleEdit() {
+        playerHolder.player?.pause()
+        isPlaying = false
         // Check if we have the video URL cached
         if viewModel.videoURLCache[project.videoFileId] != nil {
             showVideoEditor = true
