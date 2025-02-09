@@ -9,26 +9,6 @@ import SwiftUI
 
 struct DiscoverView: View {
     init() {
-        // Debug: Print all available fonts
-        for family in UIFont.familyNames.sorted() {
-            print("👉 Font Family: \(family)")
-            for name in UIFont.fontNames(forFamilyName: family) {
-                print("   - \(name)")
-            }
-        }
-        
-        // Debug: Print bundle contents
-        if let bundlePath = Bundle.main.resourcePath {
-            print("\n📦 Bundle Contents:")
-            do {
-                let items = try FileManager.default.contentsOfDirectory(atPath: bundlePath)
-                for item in items where item.contains("Mono") {
-                    print("   - \(item)")
-                }
-            } catch {
-                print("❌ Error reading bundle: \(error)")
-            }
-        }
     }
     
     var body: some View {
@@ -107,4 +87,3 @@ struct TrendingVideoCell: View {
         }
     }
 }
-

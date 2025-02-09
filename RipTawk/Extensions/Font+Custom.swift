@@ -18,4 +18,4 @@ extension Font {
         .custom("'-Mono-Regular", size: 12)
     }
 
-} 
+}
