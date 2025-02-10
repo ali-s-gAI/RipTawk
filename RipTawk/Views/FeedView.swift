@@ -40,40 +40,21 @@ struct FeedView: View {
         .onAppear {
             Task {
                 await viewModel.loadFeedVideos()
-                // Set initial scroll position to first video
-                if let firstProjectId = viewModel.projects.first?.id {
-                    await MainActor.run {
-                        scrollPosition = firstProjectId
-                    }
+                // Set initial scroll position immediately when we have projects
+                if let firstId = viewModel.projects.first?.id {
+                    scrollPosition = firstId
                 }
             }
         }
-        .onDisappear {
-            viewModel.cleanupAllPlayers()
-        }
-        .onChange(of: scenePhase, handleScenePhaseChange)
-    }
-    
-    private func handleScenePhaseChange(_ oldPhase: ScenePhase, _ newPhase: ScenePhase) {
-        switch newPhase {
-        case .inactive, .background:
-            print("📱 App entering background - pausing playback")
-            viewModel.cleanupAllPlayers()
-        case .active:
-            print("📱 App becoming active")
-        @unknown default:
-            break
-        }
-    }
-    
-    private func preloadNextVideo(at index: Int) {
-        guard index < viewModel.projects.count else { return }
-        let nextProject = viewModel.projects[index]
-        Task {
-            // Cache video URL for smooth transitions
-            if viewModel.videoURLCache[nextProject.videoFileId] == nil {
-                let url = try? await AppwriteService.shared.getVideoURL(fileId: nextProject.videoFileId)
-                viewModel.cacheVideoURL(url, for: nextProject.videoFileId)
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .inactive, .background:
+                print("📱 App entering background - pausing playback")
+                viewModel.cleanupAllPlayers()
+            case .active:
+                print("📱 App becoming active")
+            @unknown default:
+                break
             }
         }
     }
@@ -122,18 +103,14 @@ class FeedViewModel: ObservableObject {
             let url = try await getVideoURL(for: project.videoFileId)
             videoURLCache[project.videoFileId] = url
             
-            // Create and prepare player in background
             if players[project.id] == nil {
                 let player = AVPlayer(url: url)
                 player.automaticallyWaitsToMinimizeStalling = false
                 
-                // Configure buffer size for smoother playback
                 let playerItem = player.currentItem
                 playerItem?.preferredForwardBufferDuration = 3.0
                 
-                // Start preloading the asset
                 if let asset = playerItem?.asset {
-                    // Load essential properties
                     try? await asset.load(.duration, .tracks)
                 }
                 
@@ -142,8 +119,8 @@ class FeedViewModel: ObservableObject {
                 print("✅ Player created and preloaded for index \(index)")
             }
             
-            // Preload next video if needed
-            if index == currentIndex && index + 1 < projects.count {
+            // Only preload next video if within reasonable range (e.g., next 2 videos)
+            if index == currentIndex && index + 1 < projects.count && index - currentIndex < 2 {
                 await preloadVideo(at: index + 1, currentIndex: currentIndex)
             }
             
@@ -173,31 +150,12 @@ class FeedViewModel: ObservableObject {
         videoURLCache[fileId] = url
     }
     
-    func pausePlayer(for index: Int) {
-        players[projects[index].id]?.pause()
-    }
-    
-    func playPlayer(for index: Int) {
-        // First pause all players to prevent audio overlap
-        for (_, player) in players {
-            player.pause()
-            player.seek(to: .zero)
-        }
-        // Then play the current one
-        if let player = players[projects[index].id] {
-            player.seek(to: .zero)
-            player.play()
-        }
-    }
-    
     func cleanupAllPlayers() {
         print("🧹 Cleaning up all players")
-        for (index, player) in players {
-            print("⏹️ Pausing player \(index)")
+        for (_, player) in players {
+            print("⏹️ Pausing player")
             player.pause()
-            // Don't replace item with nil, just pause
         }
-        // Don't remove all players, keep them cached
     }
     
     func getVideoURL(for fileId: String) async throws -> URL {
@@ -429,7 +387,6 @@ struct FeedVideoView: View {
                     loadVideo()
                 } else {
                     print("onChange: Active and player exists – restarting video for project \(project.id)")
-                    playerHolder.player?.seek(to: .zero)
                     if isPlaying {
                         playerHolder.player?.play()
                     }
@@ -439,16 +396,6 @@ struct FeedVideoView: View {
                 handleInactiveState()
             }
         }
-        // Listen for app state changes to handle background/foreground
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-            playerHolder.player?.pause()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            if isActive {
-                playerHolder.player?.play()
-            }
-        }
-        // Update FeedVideoView to enhance cleanup
         .onDisappear {
             print("📱 FeedVideoView disappeared - pausing and cleaning up player")
             playerHolder.player?.pause()
@@ -540,7 +487,7 @@ struct FeedVideoView: View {
     private func handleSingleTap() {
         isPlaying.toggle()
         if let currentPlayer = playerHolder.player {
-            print("handleSingleTap: isPlaying = \(isPlaying), player rate before: \(currentPlayer.rate), currentTime: \(CMTimeGetSeconds(currentPlayer.currentTime()))")
+            print("handleSingleTap: isPlaying = \(isPlaying), player rate before: \(currentPlayer.rate)")
             if isPlaying {
                 currentPlayer.play()
             } else {
