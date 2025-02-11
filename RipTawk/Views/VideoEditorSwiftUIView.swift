@@ -156,10 +156,18 @@ struct VideoEditorSwiftUIView: View {
                     print("🎬 [EDITOR] Showing editor with video URL: \(videoURL.absoluteString)")
                 }
             } else if isLoading {
-                ProgressView("Loading video...")
-                    .onAppear {
-                        print("🎬 [EDITOR] Showing loading state")
+                VStack(spacing: 0) {
+                    Spacer()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Loading video...")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
                     }
+                    Spacer()
+                }
+                .background(Color(.systemBackground))
             } else if let error = errorMessage {
                 Text("Error: \(error)")
                     .foregroundColor(.red)

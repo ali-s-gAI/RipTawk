@@ -1,14 +1,19 @@
 import SwiftUI
 
 extension Color {
-    static let brandPrimary = Color(hex: "123524")
-    static let brandSecondary = Color(hex: "123524").opacity(0.8)
-    static let brandBackground = Color(hex: "123524").opacity(0.1)
+    static let brandPrimary = Color(hex: "00FF9D")  // Bright neon green
+    static let brandSecondary = Color(hex: "00FF9D").opacity(0.8)
+    static let brandBackground = Color(hex: "00FF9D").opacity(0.1)
     
     // Semantic colors for specific uses
     static let brandAction = Color.brandPrimary
     static let brandHighlight = Color.brandSecondary
     static let brandSurface = Color.brandBackground
+    
+    // Tab bar specific colors
+    static let tabBarSelected = Color.brandPrimary
+    static let tabBarGlow = Color.brandPrimary.opacity(0.6)
+    static let tabBarUnselected = Color.white.opacity(0.35)
     
     // Hex initializer implementation...
     init(hex: String) {
@@ -58,5 +63,39 @@ struct NavigationBarModifier: ViewModifier {
     
     func body(content: Content) -> some View {
         content
+    }
+}
+
+struct CustomTabBarModifier: ViewModifier {
+    let isSelected: Bool
+    
+    func body(content: Content) -> some View {
+        content
+            .foregroundColor(isSelected ? .tabBarSelected : .tabBarUnselected)
+            .scaleEffect(isSelected ? 1.25 : 1.0)
+            // Multiple layered shadows for stronger glow
+            .shadow(color: isSelected ? .tabBarGlow : .clear, radius: 12, x: 0, y: 0)
+            .shadow(color: isSelected ? .tabBarGlow : .clear, radius: 8, x: 0, y: 0)
+            .shadow(color: isSelected ? .tabBarGlow : .clear, radius: 4, x: 0, y: 0)
+            .overlay(
+                VStack(spacing: 4) {
+                    Spacer()
+                    Rectangle()
+                        .fill(Color.tabBarSelected)
+                        .frame(width: 35, height: 3)
+                        .cornerRadius(1.5)
+                        // Multiple shadows for the indicator bar too
+                        .shadow(color: .tabBarGlow, radius: 8)
+                        .shadow(color: .tabBarGlow, radius: 4)
+                }
+                .opacity(isSelected ? 1 : 0)
+            )
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+    }
+}
+
+extension View {
+    func customTabBarItem(isSelected: Bool) -> some View {
+        self.modifier(CustomTabBarModifier(isSelected: isSelected))
     }
 } 

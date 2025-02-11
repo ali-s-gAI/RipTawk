@@ -38,11 +38,18 @@ struct FeedView: View {
         .ignoresSafeArea(.container, edges: [.top, .leading, .trailing])
         .background(.black)
         .onAppear {
-            Task {
-                await viewModel.loadFeedVideos()
-                // Set initial scroll position immediately when we have projects
-                if let firstId = viewModel.projects.first?.id {
-                    scrollPosition = firstId
+            Task { @MainActor in
+                // If we already have projects but no scroll position, restore it
+                if !viewModel.projects.isEmpty && scrollPosition == nil {
+                    scrollPosition = viewModel.projects.first?.id
+                    // Preload the first video again
+                    await viewModel.preloadVideo(at: 0, currentIndex: 0)
+                } else if viewModel.projects.isEmpty {
+                    // Only load feed videos if we don't have any
+                    await viewModel.loadFeedVideos()
+                    if let firstId = viewModel.projects.first?.id {
+                        scrollPosition = firstId
+                    }
                 }
             }
         }
@@ -53,6 +60,14 @@ struct FeedView: View {
                 viewModel.cleanupAllPlayers()
             case .active:
                 print("📱 App becoming active")
+                // Reload current video when becoming active
+                if let currentPosition = scrollPosition {
+                    Task {
+                        if let index = viewModel.projects.firstIndex(where: { $0.id == currentPosition }) {
+                            await viewModel.preloadVideo(at: index, currentIndex: index)
+                        }
+                    }
+                }
             @unknown default:
                 break
             }
@@ -60,150 +75,50 @@ struct FeedView: View {
     }
 }
 
-@MainActor
-class FeedViewModel: ObservableObject {
-    @Published var projects: [VideoProject] = []
-    var videoURLCache: [String: URL] = [:]
-    var players: [String: AVPlayer] = [:]
-    var preloadedIndices = Set<String>()
-    
-    // Keep these private
-    private var activeDownloads: Set<String> = []
+// Create a new VideoLoader class that's not on the main actor
+class VideoLoader {
+    private var downloadTasks: [String: Task<URL, Error>] = [:]
     private let fileManager = FileManager.default
-    private var cachePath: URL? {
+    var cachePath: URL? {
         fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("videoCache")
     }
     
     init() {
-        // Create cache directory if needed
         if let path = cachePath {
             try? fileManager.createDirectory(at: path, withIntermediateDirectories: true)
         }
     }
     
-    // Clean up players when view model is deinitialized
-    deinit {
-        for player in players.values {
-            player.pause()
-        }
-        players.removeAll()
-    }
-    
-    func preloadVideo(at index: Int, currentIndex: Int) async {
-        guard index < projects.count,
-              !preloadedIndices.contains(projects[index].id) else {
-            print("⏭️ Skipping preload - already loaded or invalid index")
-            return
-        }
-        
-        let project = projects[index]
-        
-        do {
-            print("🔄 Preloading video at index \(index)")
-            let url = try await getVideoURL(for: project.videoFileId)
-            videoURLCache[project.videoFileId] = url
-            
-            if players[project.id] == nil {
-                let player = AVPlayer(url: url)
-                player.automaticallyWaitsToMinimizeStalling = false
-                
-                let playerItem = player.currentItem
-                playerItem?.preferredForwardBufferDuration = 3.0
-                
-                if let asset = playerItem?.asset {
-                    try? await asset.load(.duration, .tracks)
-                }
-                
-                players[project.id] = player
-                preloadedIndices.insert(project.id)
-                print("✅ Player created and preloaded for index \(index)")
-            }
-            
-            // Only preload next video if within reasonable range (e.g., next 2 videos)
-            if index == currentIndex && index + 1 < projects.count && index - currentIndex < 2 {
-                await preloadVideo(at: index + 1, currentIndex: currentIndex)
-            }
-            
-        } catch {
-            print("❌ Error preloading video: \(error)")
-        }
-    }
-    
-    func loadFeedVideos() async {
-        do {
-            print("📚 Starting to load feed videos")
-            let projects = try await AppwriteService.shared.listUserVideos()
-            self.projects = projects
-            print("📚 Loaded \(projects.count) videos")
-            
-            // Immediately start preloading first video
-            if !projects.isEmpty {
-                print("🔄 Preloading first video")
-                await preloadVideo(at: 0, currentIndex: 0)
-            }
-        } catch {
-            print("❌ Error loading feed videos: \(error)")
-        }
-    }
-    
-    func cacheVideoURL(_ url: URL?, for fileId: String) {
-        videoURLCache[fileId] = url
-    }
-    
-    func cleanupAllPlayers() {
-        print("🧹 Cleaning up all players")
-        for (_, player) in players {
-            print("⏹️ Pausing player")
-            player.pause()
-        }
-    }
-    
     func getVideoURL(for fileId: String) async throws -> URL {
-        // Check memory cache first
-        if let cachedURL = videoURLCache[fileId] {
-            print("📎 Using memory-cached URL for \(fileId)")
-            // Ensure file still exists
-            if cachedURL.isFileURL && FileManager.default.fileExists(atPath: cachedURL.path) {
-                return cachedURL
-            } else {
-                videoURLCache.removeValue(forKey: fileId)
+        // If we have a Task in progress, await it
+        if let existingTask = downloadTasks[fileId] {
+            return try await existingTask.value
+        }
+        
+        // Create new download task
+        let task = Task<URL, Error> {
+            // Check disk cache first
+            if let localURL = getCachedVideoURL(for: fileId),
+               FileManager.default.fileExists(atPath: localURL.path) {
+                print("📎 Using disk-cached video for \(fileId)")
+                return localURL
             }
-        }
-        
-        // Check disk cache
-        if let localURL = getCachedVideoURL(for: fileId) {
-            print("📎 Using disk-cached video for \(fileId)")
-            videoURLCache[fileId] = localURL
-            return localURL
-        }
-        
-        // Prevent concurrent downloads of the same video
-        guard !activeDownloads.contains(fileId) else {
-            print("⏳ Waiting for existing download of \(fileId)")
-            // Wait for existing download
-            while activeDownloads.contains(fileId) {
-                try await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+            
+            // Download and cache
+            print("📥 Downloading video \(fileId)")
+            let url = try await AppwriteService.shared.getVideoURL(fileId: fileId)
+            
+            if let localURL = try? await cacheVideo(from: url, fileId: fileId) {
+                return localURL
             }
-            if let url = videoURLCache[fileId] {
-                return url
-            }
-            throw NSError(domain: "", code: -1)
+            
+            return url
         }
         
-        activeDownloads.insert(fileId)
-        defer { activeDownloads.remove(fileId) }
+        downloadTasks[fileId] = task
+        defer { downloadTasks.removeValue(forKey: fileId) }
         
-        // Download and cache
-        print("📥 Downloading video \(fileId)")
-        let url = try await AppwriteService.shared.getVideoURL(fileId: fileId)
-        
-        // Cache to disk
-        if let localURL = try? await cacheVideo(from: url, fileId: fileId) {
-            videoURLCache[fileId] = localURL
-            return localURL
-        }
-        
-        return url
+        return try await task.value
     }
     
     private func getCachedVideoURL(for fileId: String) -> URL? {
@@ -241,6 +156,71 @@ class FeedViewModel: ObservableObject {
     }
 }
 
+@MainActor
+class FeedViewModel: ObservableObject {
+    @Published var projects: [VideoProject] = []
+    private var videoLoader = VideoLoader()
+    
+    // Keep these for URL management
+    private var activeDownloads: Set<String> = []
+    var videoURLCache: [String: URL] = [:]
+    
+    init() {
+        if let path = videoLoader.cachePath {
+            try? FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
+        }
+    }
+    
+    func loadFeedVideos() async {
+        do {
+            print("📚 Starting to load feed videos")
+            // Simplified async call
+            let projects = try await AppwriteService.shared.listUserVideos()
+            self.projects = projects
+            print("📚 Loaded \(projects.count) videos")
+            
+            // Start preloading first video if available
+            if !projects.isEmpty {
+                print("🔄 Preloading first video")
+                await preloadVideo(at: 0, currentIndex: 0)
+            }
+        } catch {
+            print("❌ Error loading feed videos: \(error)")
+        }
+    }
+    
+    func preloadVideo(at index: Int, currentIndex: Int) async {
+        guard index < projects.count else { return }
+        
+        let project = projects[index]
+        
+        do {
+            print("🔄 Preloading video at index \(index)")
+            let url = try await videoLoader.getVideoURL(for: project.videoFileId)
+            
+            // Cache the URL
+            videoURLCache[project.videoFileId] = url
+        } catch {
+            print("❌ Error preloading video: \(error)")
+        }
+    }
+    
+    func getVideoURL(for fileId: String) async throws -> URL {
+        let url = try await videoLoader.getVideoURL(for: fileId)
+        videoURLCache[fileId] = url
+        return url
+    }
+    
+    func cacheVideoURL(_ url: URL?, for fileId: String) {
+        // This method is no longer used in the new implementation
+    }
+    
+    func cleanupAllPlayers() {
+        print("🧹 Cleaning up video URL cache")
+        videoURLCache.removeAll()
+    }
+}
+
 struct FeedVideoView: View {
     let project: VideoProject
     let isActive: Bool
@@ -252,13 +232,7 @@ struct FeedVideoView: View {
     @State private var showCoinAnimation = false
     @State private var lastTapPosition: CGPoint = .zero
     @State private var showVideoEditor = false
-    
-    // Reset state when video becomes inactive
-    private func handleInactiveState() {
-        isPlaying = true  // Reset to true when video becomes inactive
-        playerHolder.player?.pause()
-        // Don't seek to zero or cleanup player here
-    }
+    @State private var isLoading = false
     
     var body: some View {
         ZStack {
@@ -268,7 +242,9 @@ struct FeedVideoView: View {
             } else {
                 Color.black
                     .containerRelativeFrame([.horizontal, .vertical])
-                ProgressView("Loading video...")
+                if isLoading {
+                    ProgressView("Loading video...")
+                }
             }
             
             // Expanded tap area with updated gesture handling for single and double taps
@@ -380,26 +356,22 @@ struct FeedVideoView: View {
                 )
             }
         }
+        .onAppear {
+            print("📱 FeedVideoView appeared for \(project.id)")
+            loadVideoIfNeeded()
+        }
         .onChange(of: isActive) { _, newValue in
             if newValue {
-                if playerHolder.player == nil {
-                    print("onChange: Active and no player – loading video for project \(project.id)")
-                    loadVideo()
-                } else {
-                    print("onChange: Active and player exists – restarting video for project \(project.id)")
-                    if isPlaying {
-                        playerHolder.player?.play()
-                    }
-                }
+                print("🎬 Video \(project.id) becoming active")
+                loadVideoIfNeeded()
             } else {
-                print("onChange: Inactive – pausing video for project \(project.id)")
-                handleInactiveState()
+                print("⏸️ Video \(project.id) becoming inactive")
+                playerHolder.player?.pause()
             }
         }
         .onDisappear {
-            print("📱 FeedVideoView disappeared - pausing and cleaning up player")
-            playerHolder.player?.pause()
-            playerHolder.cleanup()
+            print("📱 FeedVideoView disappeared for \(project.id)")
+            cleanupPlayer()
         }
         // Replace the existing sheet with fullScreenCover
         .fullScreenCover(isPresented: $showVideoEditor) {
@@ -422,66 +394,76 @@ struct FeedVideoView: View {
         }
     }
     
-    private func loadVideo() {
+    private func loadVideoIfNeeded() {
+        // If we already have a valid player, just play it
+        if let player = playerHolder.player {
+            if isPlaying {
+                player.play()
+            }
+            return
+        }
+        
+        // Otherwise, load the video
+        isLoading = true
+        
         Task {
             do {
                 print("🎥 Loading video for project \(project.id)")
                 let url = try await viewModel.getVideoURL(for: project.videoFileId)
-                await setupPlayer(with: url, projectId: project.id)
-                if isActive {
-                    playerHolder.player?.play()
+                
+                // Check if we're still active before continuing
+                guard isActive else {
+                    print("⚠️ Video \(project.id) no longer active, cancelling load")
+                    return
+                }
+                
+                // Load asset in background
+                let asset = AVURLAsset(url: url)
+                try? await asset.load(.duration, .tracks)
+                
+                // Check active state again
+                guard isActive else {
+                    print("⚠️ Video \(project.id) no longer active after asset load")
+                    return
+                }
+                
+                // Setup player on main actor
+                await MainActor.run {
+                    let player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+                    player.automaticallyWaitsToMinimizeStalling = false
+                    player.actionAtItemEnd = .none
+                    
+                    // Add loop observer
+                    NotificationCenter.default.addObserver(
+                        forName: .AVPlayerItemDidPlayToEndTime,
+                        object: player.currentItem,
+                        queue: .main
+                    ) { [weak player] _ in
+                        player?.seek(to: .zero)
+                        player?.play()
+                    }
+                    
+                    playerHolder.player = player
+                    isLoading = false
+                    
+                    if isPlaying && isActive {
+                        player.play()
+                    }
                 }
             } catch {
-                print("❌ Error loading video: \(error)")
+                print("❌ Error loading video \(project.id): \(error)")
+                await MainActor.run {
+                    isLoading = false
+                }
             }
         }
     }
     
-    private func setupPlayer(with url: URL, projectId: String) async {
-        print("🎬 Setting up player for project \(projectId) with URL: \(url.absoluteString)")
-        
-        let asset = AVURLAsset(url: url)
-        do {
-            let item = AVPlayerItem(asset: asset)
-            let status = try await item.asset.load(.isPlayable)
-            guard status else {
-                print("❌ Asset is not playable for project \(projectId)")
-                return
-            }
-            
-            // Remove any existing player and observers first
-            if let existingPlayer = playerHolder.player {
-                NotificationCenter.default.removeObserver(self, 
-                    name: .AVPlayerItemDidPlayToEndTime,
-                    object: existingPlayer.currentItem)
-                existingPlayer.pause()
-                existingPlayer.replaceCurrentItem(with: nil)
-            }
-            
-            let player = AVPlayer(playerItem: item)
-            player.automaticallyWaitsToMinimizeStalling = false
-            player.actionAtItemEnd = .none
-            
-            // New: Loop the video
-            NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime,
-                object: item,
-                queue: .main
-            ) { [weak player] _ in
-                player?.seek(to: .zero)
-                player?.play()
-            }
-            
-            await MainActor.run {
-                playerHolder.player = player
-                if isActive {
-                    print("▶️ Auto-playing video \(projectId)")
-                    player.play()
-                }
-            }
-        } catch {
-            print("❌ Error setting up player: \(error)")
-        }
+    private func cleanupPlayer() {
+        print("🧹 Cleaning up player for \(project.id)")
+        playerHolder.cleanup()
+        isPlaying = true
+        isLoading = false
     }
     
     private func handleSingleTap() {
@@ -553,20 +535,17 @@ struct FeedVideoView: View {
 class PlayerHolder: ObservableObject {
     @Published var player: AVPlayer?
     
-    deinit {
-        print("🗑️ PlayerHolder being deinitialized")
-        cleanup()
+    func cleanup() {
+        if player != nil {
+            NotificationCenter.default.removeObserver(self)
+            player?.pause()
+            player?.replaceCurrentItem(with: nil)
+            player = nil
+        }
     }
     
-    func cleanup() {
-        if let player = player {
-            NotificationCenter.default.removeObserver(self,
-                name: .AVPlayerItemDidPlayToEndTime,
-                object: player.currentItem)
-        }
-        player?.pause()
-        player?.replaceCurrentItem(with: nil)
-        player = nil
+    deinit {
+        cleanup()
     }
 }
 
