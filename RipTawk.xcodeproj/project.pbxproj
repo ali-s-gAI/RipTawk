@@ -71,6 +71,11 @@
 			path = RipTawkUITests;
 			sourceTree = "<group>";
 		};
+		357F88382D5C66D60016EB30 /* functions */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = functions;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -103,6 +108,7 @@
 		35566EFD2D516C4000682139 = {
 			isa = PBXGroup;
 			children = (
+				357F88382D5C66D60016EB30 /* functions */,
 				35F2D8812D57E04A005FDB93 /* Fonts */,
 				359350052D52B24200374E2F /* license */,
 				35566F082D516C4000682139 /* RipTawk */,
@@ -157,6 +163,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				35566F082D516C4000682139 /* RipTawk */,
+				357F88382D5C66D60016EB30 /* functions */,
 			);
 			name = RipTawk;
 			packageProductDependencies = (
