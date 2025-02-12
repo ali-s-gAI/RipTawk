@@ -1,5 +1,8 @@
 // index.js
 import OpenAI from 'openai';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 export default async function(context) {
   try {
@@ -72,15 +75,14 @@ export default async function(context) {
     console.log('✅ OpenAI client initialized');
     console.log('🎙 Calling Whisper API...');
     
-    // Create a temporary file object for OpenAI
-    const file = {
-      buffer: fileBuffer,
-      name: `audio.${format}`
-    };
+    // Map the m4a format to the more standard MIME type 'audio/mp4'
+    const mimeType = (format === 'm4a') ? 'audio/mp4' : `audio/${format}`;
+    // Create a file object directly from the buffer with the appropriate filename and content type
+    const fileObj = { value: fileBuffer, options: { filename: `audio.${format}`, contentType: mimeType } };
     
     // Call Whisper API
     const transcription = await openai.audio.transcriptions.create({
-      file: file,
+      file: fileObj,
       model: "whisper-1",
     });
     
