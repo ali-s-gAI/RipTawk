@@ -4,6 +4,9 @@
   "description": "Audio transcription function using OpenAI Whisper",
   "main": "index.js",
   "type": "module",
+  "scripts": {
+    "install-deps": "npm install"
+  },
   "dependencies": {
     "node-fetch": "^3.3.0",
     "form-data": "^4.0.0"
