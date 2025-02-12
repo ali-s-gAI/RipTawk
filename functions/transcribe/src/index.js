@@ -75,11 +75,13 @@ export default async function(context) {
     console.log('✅ OpenAI client initialized');
     console.log('🎙 Calling Whisper API...');
     
-    // Call Whisper API
+    // Map the m4a format to the more standard MIME type 'audio/mp4'
+    const mimeType = (format === 'm4a') ? 'audio/mp4' : `audio/${format}`;
+    
     const transcription = await openai.audio.transcriptions.create({
       file: fileBuffer,
-      filename: `audio.${format}`,
-      model: "whisper-1",
+      filename: `audio.${format}`,    // so OpenAI knows how to handle it
+      model: "whisper-1"
     });
     
     console.log('✅ Received transcript length:', transcription.text.length);
