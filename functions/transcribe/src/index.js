@@ -59,7 +59,7 @@ export default async function(context) {
     }
     
     // Initialize OpenAI client
-    const openaiApiKey = context.req.variables['OPENAI_API_KEY'];
+    const openaiApiKey = process.env.OPENAI_API_KEY;
     if (!openaiApiKey) {
       console.error('❌ Missing OpenAI API key');
       return { error: 'Missing OPENAI_API_KEY environment variable' };
