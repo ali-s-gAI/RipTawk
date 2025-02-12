@@ -12,11 +12,28 @@
 	<string>RipTawk needs access to save and load your videos.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>RipTawk needs access to save your recorded videos.</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Need audio access to convert video files</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>' Mono Regular.ttf</string>
 		<string>' Mono Bold.ttf</string>
 		<string>' Mono Light.ttf</string>
 	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>appwrite.global</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 </dict>
 </plist>

@@ -43,7 +43,7 @@ struct MainTabView: View {
             
             DiscoverView()
                 .tabItem {
-                    Label("Discover", systemImage: "magnifyingglass")
+                    Label("Discover", systemImage: "sparkles")
                 }
                 .tag(1)
             

@@ -10,6 +10,8 @@ struct VideoProject: Identifiable, Codable {
     let duration: TimeInterval
     let createdAt: Date
     let userId: String        // Appwrite user ID
+    let transcript: String?   // Optional transcript text
+    let isTranscribed: Bool   // Flag to track transcription status
     
     enum CodingKeys: String, CodingKey {
         case id = "$id"       // Appwrite uses $id for document IDs
@@ -18,6 +20,8 @@ struct VideoProject: Identifiable, Codable {
         case duration
         case createdAt
         case userId
+        case transcript
+        case isTranscribed
     }
 }
 
@@ -28,11 +32,13 @@ class AppwriteService {
     let account: Account
     let storage: Storage
     let databases: Databases
+    let functions: Functions
     
     // Constants
     private let databaseId = "67a2ea9400210dd0d73b"  // main
     private let videosCollectionId = "67a2eaa90034a69780ef"  // videos
     private let videoBucketId = "67a2eabd002ffabdf95f"  // videos
+    let transcriptionFunctionId = "67ac304b000401bf40eb"
     @AppStorage("currentUserId") private var currentUserId: String = ""
     
     // This cache is cleared when app restarts
@@ -59,6 +65,7 @@ class AppwriteService {
         account = Account(client)
         storage = Storage(client)
         databases = Databases(client)
+        functions = Functions(client)
     }
     
     // MARK: - Session Management
@@ -176,7 +183,9 @@ class AppwriteService {
             videoFileId: file.id,
             duration: duration,
             createdAt: now,
-            userId: currentUserId
+            userId: currentUserId,
+            transcript: nil,
+            isTranscribed: false
         )
     }
     
@@ -236,13 +245,18 @@ class AppwriteService {
                     throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid userId"])
                 }
                 
+                let transcript = data["transcript"]?.value as? String
+                let isTranscribed = data["isTranscribed"]?.value as? Bool ?? false
+                
                 return VideoProject(
                     id: doc.id,
                     title: title,
                     videoFileId: videoFileId,
                     duration: duration,
                     createdAt: createdAt,
-                    userId: userId
+                    userId: userId,
+                    transcript: transcript,
+                    isTranscribed: isTranscribed
                 )
             } catch {
                 print("❌ [DEBUG] Error parsing document \(doc.id): \(error)")
@@ -338,7 +352,7 @@ class AppwriteService {
         }
         
         // 1. Upload new file to storage first
-        print("�� [UPDATE] Uploading new file to bucket: \(videoBucketId)")
+        print("📤 [UPDATE] Uploading new file to bucket: \(videoBucketId)")
         let file = try await storage.createFile(
             bucketId: videoBucketId,
             fileId: ID.unique(),
@@ -395,7 +409,9 @@ class AppwriteService {
             videoFileId: file.id,
             duration: duration,
             createdAt: project.createdAt,
-            userId: currentUserId
+            userId: currentUserId,
+            transcript: project.transcript,
+            isTranscribed: project.isTranscribed
         )
         print("✅ [UPDATE] Returning updated project with new videoFileId: \(updatedProject.videoFileId)")
         return updatedProject
@@ -420,7 +436,105 @@ class AppwriteService {
             videoFileId: project.videoFileId,
             duration: project.duration,
             createdAt: project.createdAt,
-            userId: project.userId
+            userId: project.userId,
+            transcript: project.transcript,
+            isTranscribed: project.isTranscribed
         )
+    }
+    
+    // Get all projects (wrapper around listUserVideos)
+    func getProjects() async throws -> [Project] {
+        let videoProjects = try await listUserVideos()
+        
+        // Convert VideoProject to Project using async operations
+        var projects: [Project] = []
+        for videoProject in videoProjects {
+            // Get video URL (either from cache or fetch new)
+            let videoURL = try await getVideoURL(fileId: videoProject.videoFileId)
+            
+            let project = Project(
+                id: videoProject.id,
+                title: videoProject.title,
+                videoURL: videoURL,  // Use actual URL instead of just cached
+                isTranscribed: videoProject.isTranscribed
+            )
+            projects.append(project)
+        }
+        
+        return projects
+    }
+    
+    // Update project with transcript
+    func updateProjectTranscript(projectId: String, transcript: String) async throws {
+        print("📝 [UPDATE] Adding transcript to project: \(projectId)")
+        
+        let data: [String: Any] = [
+            "transcript": transcript,
+            "isTranscribed": true
+        ]
+        
+        do {
+            try await databases.updateDocument(
+                databaseId: databaseId,
+                collectionId: videosCollectionId,
+                documentId: projectId,
+                data: data
+            )
+            print("✅ [UPDATE] Successfully added transcript")
+        } catch {
+            print("❌ [UPDATE] Error updating transcript: \(error)")
+            throw error
+        }
+    }
+    
+    private func callTranscriptionService(audioData: Data) async throws -> String {
+        // Construct the Appwrite function URL
+        let functionURL = "\(client.endPoint)/functions/transcribe/executions"
+        guard var urlComponents = URLComponents(string: functionURL) else {
+            throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid function URL"])
+        }
+        
+        urlComponents.queryItems = [
+            URLQueryItem(name: "project", value: "riptawk")
+        ]
+        
+        guard let url = urlComponents.url else {
+            throw NSError(domain: "AppwriteService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid function URL"])
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("audio/m4a", forHTTPHeaderField: "Content-Type")
+        
+        // Add Appwrite session cookie if needed
+        if let cookies = HTTPCookieStorage.shared.cookies {
+            let cookieHeaders = HTTPCookie.requestHeaderFields(with: cookies)
+            for (key, value) in cookieHeaders {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+        }
+        
+        print("🎙 [TRANSCRIBE] Calling function at: \(url.absoluteString)")
+        
+        let (data, response) = try await URLSession.shared.upload(for: request, from: audioData)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "AppwriteService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
+        }
+        
+        print("🎙 [TRANSCRIBE] Response status: \(httpResponse.statusCode)")
+        
+        guard httpResponse.statusCode == 200 else {
+            if let errorText = String(data: data, encoding: .utf8) {
+                print("🎙 [TRANSCRIBE] Error response: \(errorText)")
+            }
+            throw NSError(domain: "AppwriteService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Function returned error \(httpResponse.statusCode)"])
+        }
+        
+        guard let transcript = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "AppwriteService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Invalid response format"])
+        }
+        
+        return transcript
     }
 } 
