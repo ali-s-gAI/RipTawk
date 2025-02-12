@@ -1,6 +1,5 @@
 // index.js
-import fetch from 'node-fetch';
-import FormData from 'form-data';
+import OpenAI from 'openai';
 
 export default async function(req, res) {
   try {
@@ -47,48 +46,39 @@ export default async function(req, res) {
       return res.json({ error: 'Empty audio buffer' });
     }
     
-    // Prepare the form data
-    const form = new FormData();
-    form.append('file', fileBuffer, {
-      filename: `audio.${format}`,
-      contentType: `audio/${format}`
-    });
-    form.append('model', 'whisper-1');
-    
-    // Log OpenAI API key presence (not the actual key)
+    // Initialize OpenAI client
     const openaiApiKey = process.env.OPENAI_API_KEY;
     if (!openaiApiKey) {
       console.error('❌ Missing OpenAI API key');
-      res.json({ error: 'Missing OPENAI_API_KEY environment variable' });
-      return;
+      return res.json({ error: 'Missing OPENAI_API_KEY environment variable' });
     }
-    console.log('✅ OpenAI API key found');
     
-    console.log('🎙 Calling Whisper API...');
-    const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`
-      },
-      body: form
+    const openai = new OpenAI({
+      apiKey: openaiApiKey
     });
     
-    console.log('📡 Whisper API response status:', whisperResponse.status);
+    console.log('✅ OpenAI client initialized');
+    console.log('🎙 Calling Whisper API...');
     
-    if (!whisperResponse.ok) {
-      const errText = await whisperResponse.text();
-      console.error('❌ Whisper API error:', errText);
-      res.json({ error: 'Whisper API error', details: errText });
-      return;
-    }
+    // Create a temporary file object for OpenAI
+    const file = {
+      buffer: fileBuffer,
+      name: `audio.${format}`
+    };
     
-    const result = await whisperResponse.json();
-    console.log('✅ Received transcript length:', result.text.length);
+    // Call Whisper API
+    const transcription = await openai.audio.transcriptions.create({
+      file: file,
+      model: "whisper-1",
+    });
+    
+    console.log('✅ Received transcript length:', transcription.text.length);
     
     // Return the transcript text
-    res.json({ response: result.text });
+    res.json({ response: transcription.text });
+    
   } catch (error) {
     console.error('❌ Function error:', error);
     res.json({ error: error.toString() });
   }
-};
+}
