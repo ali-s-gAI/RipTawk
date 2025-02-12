@@ -75,17 +75,22 @@ export default async function(context) {
     console.log('✅ OpenAI client initialized');
     console.log('🎙 Calling Whisper API...');
     
-    // Always use mp3 format when sending to OpenAI
+    // Always use mp3 format when sending to OpenAI using temporary file approach
     const apiFormat = 'mp3';
+    const tempPath = path.join(os.tmpdir(), `temp-audio-${Date.now()}.${apiFormat}`);
+    console.log('📝 Writing temporary file:', tempPath);
+    await fs.promises.writeFile(tempPath, fileBuffer);
+    console.log('📂 Temporary file written. Creating read stream.');
+    const fileStream = fs.createReadStream(tempPath);
 
     const transcription = await openai.audio.transcriptions.create({
-      file: fileBuffer,
-      filename: `audio.${apiFormat}`,    // Using mp3 format for better compatibility
-      model: "whisper-1"
+      file: fileStream,
+      model: "whisper-1",
+      response_format: "json"
     });
 
-    
     console.log('✅ Received transcript length:', transcription.text.length);
+    await fs.promises.unlink(tempPath).catch(err => console.error('Error deleting temporary file:', err));
     
     // Return the transcript text
     return { response: transcription.text };
