@@ -27,7 +27,8 @@ struct FeedView: View {
                         viewModel: viewModel
                     )
                     .id(project.id)
-                    .containerRelativeFrame([.horizontal, .vertical])
+                    .frame(width: UIScreen.main.bounds.width,
+                           height: UIScreen.main.bounds.height)
                 }
             }
             .scrollTargetLayout()
@@ -35,7 +36,7 @@ struct FeedView: View {
         .scrollIndicators(.hidden)
         .scrollPosition(id: $scrollPosition)
         .scrollTargetBehavior(.paging)
-        .ignoresSafeArea()
+        .ignoresSafeArea(.all)
         .background(.black)
         .task {
             await loadInitialContent()
@@ -258,11 +259,13 @@ struct FeedVideoView: View {
             ZStack {
                 if let currentPlayer = playerHolder.player {
                     CustomVideoPlayer(player: currentPlayer)
-                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .frame(width: geometry.size.width, 
+                               height: geometry.size.height)
                         .clipped()
                 } else {
                     Color.black
-                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .frame(width: geometry.size.width, 
+                               height: geometry.size.height)
                     if isLoading {
                         ProgressView("Loading video...")
                     }
@@ -367,7 +370,7 @@ struct FeedVideoView: View {
                         .padding(.bottom, 20)
                         .padding(.trailing, 8)
                     }
-                    .padding(.bottom, 50)
+                    .padding(.bottom, geometry.safeAreaInsets.bottom + 50)
                     .background(
                         LinearGradient(
                             gradient: Gradient(colors: [.clear, .black.opacity(0.7)]),
@@ -379,7 +382,7 @@ struct FeedVideoView: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
-        .ignoresSafeArea()
+        .ignoresSafeArea(.all)
         .onAppear {
             print("📱 FeedVideoView appeared for \(project.id)")
             loadVideoIfNeeded()
@@ -585,14 +588,13 @@ struct CustomVideoPlayer: UIViewControllerRepresentable {
         
         // Ensure proper layout
         controller.view.backgroundColor = .black
-        controller.view.frame = UIScreen.main.bounds
+        
+        // Don't set frame here - let parent view handle sizing
         return controller
     }
     
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
         uiViewController.player = player
-        // Ensure frame is updated on rotation
-        uiViewController.view.frame = UIScreen.main.bounds
     }
 }
 
