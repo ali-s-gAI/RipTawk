@@ -1,11 +1,10 @@
 // index.js
+import fetch from 'node-fetch';
+import FormData from 'form-data';
 
-const fetch = require('node-fetch');
-const FormData = require('form-data');
-
-module.exports = async function (req, res) {
+export default async function(req, res) {
   try {
-    console.log('�� Function triggered');
+    console.log('🎯 Function triggered');
     
     // Log the raw payload
     console.log('📦 Raw payload:', req.payload);

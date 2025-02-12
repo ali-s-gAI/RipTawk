@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "description": "Audio transcription function using OpenAI Whisper",
   "main": "index.js",
+  "type": "module",
   "dependencies": {
-    "node-fetch": "^2.6.7",
+    "node-fetch": "^3.3.0",
     "form-data": "^4.0.0"
   }
 } 

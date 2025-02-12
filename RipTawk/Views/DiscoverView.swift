@@ -30,7 +30,7 @@ struct DiscoverView: View {
                                 Spacer()
                                 if !project.isTranscribed {
                                     Image(systemName: "wand.and.stars")
-                                        .foregroundColor(.blue)
+                    .foregroundColor(.blue)
                                 }
                             }
                         }
