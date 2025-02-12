@@ -1,30 +1,30 @@
 // index.js
 import OpenAI from 'openai';
 
-export default async function(req, res) {
+export default async function(context) {
   try {
     console.log('🎯 Function triggered');
     
     // Log the raw payload
-    console.log('📦 Raw payload:', req.payload);
+    console.log('📦 Raw payload:', context.req.body);
     
     // Validate payload
-    if (!req.payload) {
+    if (!context.req.body) {
       console.error('❌ No payload received');
-      return res.json({ error: 'No payload received' });
+      return { error: 'No payload received' };
     }
     
     // Get base64 audio from the request
-    const { audio, format } = req.payload;
+    const { audio, format } = context.req.body;
     
     // Validate audio data
     if (!audio) {
       console.error('❌ Missing audio data');
-      return res.json({ error: 'Missing audio data' });
+      return { error: 'Missing audio data' };
     }
     if (!format) {
       console.error('❌ Missing format');
-      return res.json({ error: 'Missing format parameter' });
+      return { error: 'Missing format parameter' };
     }
     
     console.log('📦 Received audio data length:', audio.length);
@@ -33,7 +33,7 @@ export default async function(req, res) {
     // Validate base64
     if (!/^[A-Za-z0-9+/=]+$/.test(audio)) {
       console.error('❌ Invalid base64 data');
-      return res.json({ error: 'Invalid base64 data' });
+      return { error: 'Invalid base64 data' };
     }
     
     // Convert base64 to buffer
@@ -43,14 +43,14 @@ export default async function(req, res) {
     // Validate buffer size
     if (fileBuffer.length === 0) {
       console.error('❌ Empty audio buffer');
-      return res.json({ error: 'Empty audio buffer' });
+      return { error: 'Empty audio buffer' };
     }
     
     // Initialize OpenAI client
-    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const openaiApiKey = context.req.variables['OPENAI_API_KEY'];
     if (!openaiApiKey) {
       console.error('❌ Missing OpenAI API key');
-      return res.json({ error: 'Missing OPENAI_API_KEY environment variable' });
+      return { error: 'Missing OPENAI_API_KEY environment variable' };
     }
     
     const openai = new OpenAI({
@@ -75,10 +75,10 @@ export default async function(req, res) {
     console.log('✅ Received transcript length:', transcription.text.length);
     
     // Return the transcript text
-    res.json({ response: transcription.text });
+    return { response: transcription.text };
     
   } catch (error) {
     console.error('❌ Function error:', error);
-    res.json({ error: error.toString() });
+    return { error: error.toString() };
   }
 }
