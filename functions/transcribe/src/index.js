@@ -90,6 +90,9 @@ export default async function(context) {
     });
 
     console.log('✅ Received transcript length:', transcription.text.length);
+    console.log('📝 Transcript content:', transcription.text);
+    console.log('🔍 Full transcription response:', JSON.stringify(transcription, null, 2));
+    
     await fs.promises.unlink(tempPath).catch(err => console.error('Error deleting temporary file:', err));
     
     // Return the transcript text
