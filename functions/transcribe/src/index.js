@@ -75,8 +75,8 @@ export default async function(context) {
     console.log('✅ OpenAI client initialized');
     console.log('🎙 Calling Whisper API...');
     
-    // Always use mp3 format when sending to OpenAI using temporary file approach
-    const apiFormat = 'mp3';
+    // Update the temporary file naming to use the original format from the payload
+    const apiFormat = format;
     const tempPath = path.join(os.tmpdir(), `temp-audio-${Date.now()}.${apiFormat}`);
     console.log('📝 Writing temporary file:', tempPath);
     await fs.promises.writeFile(tempPath, fileBuffer);
