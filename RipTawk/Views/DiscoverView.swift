@@ -7,7 +7,6 @@
 
 import SwiftUI
 import AVFoundation
-import UIKit  // Needed for UIDocumentPickerViewController
 
 struct DiscoverView: View {
     @State private var projects: [Project] = []
@@ -238,7 +237,7 @@ struct DiscoverView: View {
         // Call the function through AppwriteService
         let response = try await AppwriteService.shared.functions.createExecution(
             functionId: AppwriteService.shared.transcriptionFunctionId,
-            body: jsonString  // Changed back to 'body' as that's what Appwrite SDK expects
+            body: jsonString
         )
         
         print("🎙 [API] Response received: \(response)")
@@ -248,7 +247,7 @@ struct DiscoverView: View {
         // If the response is empty or failed, try to parse error from response body
         if response.responseBody.isEmpty || response.status == "failed" {
             // Try to parse error from response body
-            if let data = response.responseBody.data(using: String.Encoding.utf8),
+            if let data = response.responseBody.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 print("🎙 [API] Parsed error JSON: \(json)")
                 if let error = json["error"] as? String {
@@ -262,7 +261,7 @@ struct DiscoverView: View {
         }
         
         // Try to parse the response as JSON to get the transcript
-        if let data = response.responseBody.data(using: String.Encoding.utf8),
+        if let data = response.responseBody.data(using: .utf8),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             print("🎙 [API] Parsed response JSON: \(json)")
             if let transcript = json["response"] as? String {

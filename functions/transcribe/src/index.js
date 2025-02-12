@@ -3,82 +3,65 @@ import OpenAI from 'openai';
 
 export default async function(context) {
   try {
-    context.log('🎯 Function triggered');
+    console.log('🎯 Function triggered');
     
-    // Log raw request details
-    context.log('📦 Raw request type:', typeof context.req.body);
-    context.log('📦 Raw request keys:', Object.keys(context.req.body));
-    
-    // If body is a string, try to parse it
-    let parsedBody = context.req.body;
-    if (typeof context.req.body === 'string') {
-      context.log('📦 Body is string, attempting to parse...');
+    // Check and parse the request body if necessary
+    let payload = context.req.body;
+    if (typeof payload === 'string') {
+      console.log('📦 Body is a string, attempting to parse...');
       try {
-        parsedBody = JSON.parse(context.req.body);
-        context.log('📦 Successfully parsed body');
-      } catch (e) {
-        context.error('❌ Failed to parse body:', e);
+        payload = JSON.parse(payload);
+        console.log('📦 Successfully parsed body');
+      } catch (parseError) {
+        console.error('❌ Failed to parse request body:', parseError);
         return { error: 'Failed to parse request body' };
       }
     }
     
-    // Log parsed payload details
-    context.log('📦 Parsed body type:', typeof parsedBody);
-    context.log('📦 Parsed body keys:', Object.keys(parsedBody));
+    console.log('📦 Raw payload:', payload);
+    console.log('📦 Payload keys:', Object.keys(payload));
     
-    // Validate payload
-    if (!parsedBody) {
-      context.error('❌ No payload received');
+    if (!payload) {
+      console.error('❌ No payload received');
       return { error: 'No payload received' };
     }
     
-    // Get base64 audio from the request
-    const { audio, format } = parsedBody;
+    // Destructure audio and format from the payload
+    const { audio, format } = payload;
+    console.log('📦 Audio value:', audio);
+    console.log('📦 Audio type:', typeof audio);
     
-    // Log detailed payload info
-    context.log('📦 Format received:', format);
-    context.log('📦 Audio type:', typeof audio);
-    context.log('📦 Audio exists:', !!audio);
-    if (audio) {
-      context.log('📦 Audio length:', audio.length);
-      context.log('📦 Audio preview:', audio.substring(0, 100));
-    }
-    
-    // Validate audio data
     if (!audio) {
-      context.error('❌ Missing audio data');
+      console.error('❌ Missing audio data');
       return { error: 'Missing audio data' };
     }
     if (!format) {
-      context.error('❌ Missing format');
+      console.error('❌ Missing format');
       return { error: 'Missing format parameter' };
     }
     
-    context.log('📦 Received audio data length:', audio.length);
-    context.log('📦 Audio format:', format);
+    console.log('📦 Received audio data length:', audio.length);
+    console.log('📦 Audio format:', format);
     
-    // Validate base64
+    // Validate base64 string
     if (!/^[A-Za-z0-9+/=]+$/.test(audio)) {
-      context.error('❌ Invalid base64 data');
-      context.error('❌ First 100 chars of audio:', audio.substring(0, 100));
+      console.error('❌ Invalid base64 data');
       return { error: 'Invalid base64 data' };
     }
     
     // Convert base64 to buffer
     const fileBuffer = Buffer.from(audio, 'base64');
-    context.log('📦 Converted buffer size:', fileBuffer.length);
-    context.log('📦 Buffer preview:', fileBuffer.slice(0, 20));
+    console.log('📦 Converted buffer size:', fileBuffer.length);
     
-    // Validate buffer size
     if (fileBuffer.length === 0) {
-      context.error('❌ Empty audio buffer');
+      console.error('❌ Empty audio buffer');
       return { error: 'Empty audio buffer' };
     }
     
     // Initialize OpenAI client
     const openaiApiKey = context.req.variables['OPENAI_API_KEY'];
     if (!openaiApiKey) {
-      context.error('❌ Missing OpenAI API key');
+      console.error('❌ Missing OpenAI API key');
       return { error: 'Missing OPENAI_API_KEY environment variable' };
     }
     
@@ -86,8 +69,8 @@ export default async function(context) {
       apiKey: openaiApiKey
     });
     
-    context.log('✅ OpenAI client initialized');
-    context.log('🎙 Calling Whisper API...');
+    console.log('✅ OpenAI client initialized');
+    console.log('🎙 Calling Whisper API...');
     
     // Create a temporary file object for OpenAI
     const file = {
@@ -101,14 +84,13 @@ export default async function(context) {
       model: "whisper-1",
     });
     
-    context.log('✅ Received transcript length:', transcription.text.length);
+    console.log('✅ Received transcript length:', transcription.text.length);
     
     // Return the transcript text
     return { response: transcription.text };
     
   } catch (error) {
-    context.error('❌ Function error:', error);
-    context.error('❌ Error stack:', error.stack);
+    console.error('❌ Function error:', error);
     return { error: error.toString() };
   }
 }
