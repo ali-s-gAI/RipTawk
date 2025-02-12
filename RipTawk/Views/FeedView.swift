@@ -35,20 +35,20 @@ struct FeedView: View {
         .scrollIndicators(.hidden)
         .scrollPosition(id: $scrollPosition)
         .scrollTargetBehavior(.paging)
-        .ignoresSafeArea(.container, edges: [.top, .leading, .trailing])
+        .ignoresSafeArea()
         .background(.black)
-        .onAppear {
-            Task { @MainActor in
-                // If we already have projects but no scroll position, restore it
-                if !viewModel.projects.isEmpty && scrollPosition == nil {
-                    scrollPosition = viewModel.projects.first?.id
-                    // Preload the first video again
-                    await viewModel.preloadVideo(at: 0, currentIndex: 0)
-                } else if viewModel.projects.isEmpty {
-                    // Only load feed videos if we don't have any
-                    await viewModel.loadFeedVideos()
-                    if let firstId = viewModel.projects.first?.id {
-                        scrollPosition = firstId
+        .task {
+            await loadInitialContent()
+        }
+        .onChange(of: scrollPosition) { _, newPosition in
+            guard let newPosition else { return }
+            print("📜 Scroll position changed to: \(newPosition)")
+            
+            if let currentIndex = viewModel.projects.firstIndex(where: { $0.id == newPosition }) {
+                Task {
+                    await viewModel.preloadVideo(at: currentIndex, currentIndex: currentIndex)
+                    if currentIndex + 1 < viewModel.projects.count {
+                        await viewModel.preloadVideo(at: currentIndex + 1, currentIndex: currentIndex)
                     }
                 }
             }
@@ -71,6 +71,16 @@ struct FeedView: View {
             @unknown default:
                 break
             }
+        }
+    }
+    
+    private func loadInitialContent() async {
+        if viewModel.projects.isEmpty {
+            await viewModel.loadFeedVideos()
+        }
+        
+        if scrollPosition == nil, let firstId = viewModel.projects.first?.id {
+            scrollPosition = firstId
         }
     }
 }
@@ -160,9 +170,7 @@ class VideoLoader {
 class FeedViewModel: ObservableObject {
     @Published var projects: [VideoProject] = []
     private var videoLoader = VideoLoader()
-    
-    // Keep these for URL management
-    private var activeDownloads: Set<String> = []
+    private var activePreloads: Set<String> = []
     var videoURLCache: [String: URL] = [:]
     
     init() {
@@ -177,7 +185,7 @@ class FeedViewModel: ObservableObject {
             // Simplified async call
             let projects = try await AppwriteService.shared.listUserVideos()
             self.projects = projects
-            print("📚 Loaded \(projects.count) videos")
+            print("�� Loaded \(projects.count) videos")
             
             // Start preloading first video if available
             if !projects.isEmpty {
@@ -193,6 +201,15 @@ class FeedViewModel: ObservableObject {
         guard index < projects.count else { return }
         
         let project = projects[index]
+        
+        // Skip if already preloading
+        guard !activePreloads.contains(project.id) else {
+            print("🔄 Already preloading video \(project.id)")
+            return
+        }
+        
+        activePreloads.insert(project.id)
+        defer { activePreloads.remove(project.id) }
         
         do {
             print("🔄 Preloading video at index \(index)")
@@ -217,7 +234,9 @@ class FeedViewModel: ObservableObject {
     
     func cleanupAllPlayers() {
         print("🧹 Cleaning up video URL cache")
+        // Only remove URLs for non-visible videos
         videoURLCache.removeAll()
+        activePreloads.removeAll()
     }
 }
 
@@ -235,127 +254,132 @@ struct FeedVideoView: View {
     @State private var isLoading = false
     
     var body: some View {
-        ZStack {
-            if let currentPlayer = playerHolder.player {
-                CustomVideoPlayer(player: currentPlayer)
-                    .containerRelativeFrame([.horizontal, .vertical])
-            } else {
-                Color.black
-                    .containerRelativeFrame([.horizontal, .vertical])
-                if isLoading {
-                    ProgressView("Loading video...")
+        GeometryReader { geometry in
+            ZStack {
+                if let currentPlayer = playerHolder.player {
+                    CustomVideoPlayer(player: currentPlayer)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                } else {
+                    Color.black
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                    if isLoading {
+                        ProgressView("Loading video...")
+                    }
                 }
-            }
-            
-            // Expanded tap area with updated gesture handling for single and double taps
-            Color.clear
-                .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
-                .contentShape(Rectangle())
-                .ignoresSafeArea(edges: .all)
-                // Capture tap location using a drag gesture (minimumDistance: 0)
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 0)
-                        .onEnded { value in
-                            lastTapPosition = value.location
-                        }
-                )
-                // High priority double-tap gesture
-                .highPriorityGesture(
-                    TapGesture(count: 2)
-                        .onEnded {
-                            handleDoubleTap()
-                        }
-                )
-                // Single tap gesture for play/pause toggle
-                .onTapGesture {
-                    handleSingleTap()
-                }
-            
-            // Play button
-            if !isPlaying {
-                Circle()
-                    .fill(.black.opacity(0.6))
-                    .frame(width: 80, height: 80)
-                    .overlay(
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 40))
-                            .foregroundColor(.white)
-                    )
-                    .transition(.scale.combined(with: .opacity))
-            }
-            
-            // Coin animation
-            if showCoinAnimation {
-                CoinAnimation(
-                    isVisible: $showCoinAnimation,
-                    position: lastTapPosition
-                )
-            }
-            
-            // UI Overlay
-            VStack {
-                Spacer()
                 
-                HStack(alignment: .bottom) {
-                    // Video info on the left
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Author: \(project.userId)")
-                            .font(.appHeadline())
-                        Text(project.title)
-                            .font(.appBody())
-                        Text("Video description...")
-                            .font(.appCaption())
-                    }
-                    .foregroundColor(.white)
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    // Updated action buttons
-                    VStack(spacing: 28) {
-                        ActionButton(
-                            icon: isLiked ? "chart.line.uptrend.xyaxis.circle.fill" : "chart.line.uptrend.xyaxis",
-                            text: isLiked ? "1" : "0",
-                            action: { handleLike() },
-                            iconColor: isLiked ? Color.brandPrimary : .white
-                        )
-                        
-                        ActionButton(
-                            icon: "bubble.right",
-                            text: "0",
-                            action: {
-                                // Implement comment action
+                // Expanded tap area with updated gesture handling for single and double taps
+                Color.clear
+                    .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea(edges: .all)
+                    // Capture tap location using a drag gesture (minimumDistance: 0)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onEnded { value in
+                                lastTapPosition = value.location
                             }
-                        )
-                        
-                        ActionButton(
-                            icon: "arrowshape.turn.up.forward",
-                            text: "Share",
-                            action: {
-                                // Implement share action
-                            }
-                        )
-                        
-                        ActionButton(
-                            icon: "square.and.pencil",
-                            text: "Edit",
-                            action: {
-                                handleEdit()
-                            }
-                        )
-                    }
-                    .padding(.bottom, 20)
-                    .padding(.trailing, 8)
-                }
-                .padding(.bottom, 50)
-                .background(
-                    LinearGradient(
-                        gradient: Gradient(colors: [.clear, .black.opacity(0.7)]),
-                        startPoint: .top,
-                        endPoint: .bottom
                     )
-                )
+                    // High priority double-tap gesture
+                    .highPriorityGesture(
+                        TapGesture(count: 2)
+                            .onEnded {
+                                handleDoubleTap()
+                            }
+                    )
+                    // Single tap gesture for play/pause toggle
+                    .onTapGesture {
+                        handleSingleTap()
+                    }
+                
+                // Play button
+                if !isPlaying {
+                    Circle()
+                        .fill(.black.opacity(0.6))
+                        .frame(width: 80, height: 80)
+                        .overlay(
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 40))
+                                .foregroundColor(.white)
+                        )
+                        .transition(.scale.combined(with: .opacity))
+                }
+                
+                // Coin animation
+                if showCoinAnimation {
+                    CoinAnimation(
+                        isVisible: $showCoinAnimation,
+                        position: lastTapPosition
+                    )
+                }
+                
+                // UI Overlay
+                VStack {
+                    Spacer()
+                    
+                    HStack(alignment: .bottom) {
+                        // Video info on the left
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Author: \(project.userId)")
+                                .font(.appHeadline())
+                            Text(project.title)
+                                .font(.appBody())
+                            Text("Video description...")
+                                .font(.appCaption())
+                        }
+                        .foregroundColor(.white)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        // Updated action buttons
+                        VStack(spacing: 28) {
+                            ActionButton(
+                                icon: isLiked ? "chart.line.uptrend.xyaxis.circle.fill" : "chart.line.uptrend.xyaxis",
+                                text: isLiked ? "1" : "0",
+                                action: { handleLike() },
+                                iconColor: isLiked ? Color.brandPrimary : .white
+                            )
+                            
+                            ActionButton(
+                                icon: "bubble.right",
+                                text: "0",
+                                action: {
+                                    // Implement comment action
+                                }
+                            )
+                            
+                            ActionButton(
+                                icon: "arrowshape.turn.up.forward",
+                                text: "Share",
+                                action: {
+                                    // Implement share action
+                                }
+                            )
+                            
+                            ActionButton(
+                                icon: "square.and.pencil",
+                                text: "Edit",
+                                action: {
+                                    handleEdit()
+                                }
+                            )
+                        }
+                        .padding(.bottom, 20)
+                        .padding(.trailing, 8)
+                    }
+                    .padding(.bottom, 50)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [.clear, .black.opacity(0.7)]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
+        .ignoresSafeArea()
         .onAppear {
             print("📱 FeedVideoView appeared for \(project.id)")
             loadVideoIfNeeded()
@@ -558,11 +582,17 @@ struct CustomVideoPlayer: UIViewControllerRepresentable {
         controller.player = player
         controller.showsPlaybackControls = false
         controller.videoGravity = .resizeAspectFill
+        
+        // Ensure proper layout
+        controller.view.backgroundColor = .black
+        controller.view.frame = UIScreen.main.bounds
         return controller
     }
     
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
         uiViewController.player = player
+        // Ensure frame is updated on rotation
+        uiViewController.view.frame = UIScreen.main.bounds
     }
 }
 
