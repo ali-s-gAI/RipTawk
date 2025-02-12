@@ -82,10 +82,3 @@ export default async function(req, res) {
     res.json({ error: error.toString() });
   }
 }
-
-// Add module.exports for compatibility
-module.exports = {
-  default: async function(req, res) {
-    return await exports.default(req, res);
-  }
-};
