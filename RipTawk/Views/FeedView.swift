@@ -79,6 +79,8 @@ struct FeedView: View {
 class VideoLoader {
     private var downloadTasks: [String: Task<URL, Error>] = [:]
     private let fileManager = FileManager.default
+    private let lock = NSLock() // Add lock for thread safety
+    
     var cachePath: URL? {
         fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("videoCache")
     }
@@ -90,9 +92,27 @@ class VideoLoader {
     }
     
     func getVideoURL(for fileId: String) async throws -> URL {
+        // Guard against empty fileId
+        guard !fileId.isEmpty else {
+            throw NSError(domain: "VideoLoader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid fileId"])
+        }
+        
+        // Thread-safe task access
+        lock.lock()
+        let existingTask = downloadTasks[fileId]
+        lock.unlock()
+        
         // If we have a Task in progress, await it
-        if let existingTask = downloadTasks[fileId] {
-            return try await existingTask.value
+        if let task = existingTask {
+            do {
+                return try await task.value
+            } catch {
+                // If task failed, remove it and try again
+                lock.lock()
+                downloadTasks.removeValue(forKey: fileId)
+                lock.unlock()
+                throw error
+            }
         }
         
         // Create new download task
@@ -115,36 +135,54 @@ class VideoLoader {
             return url
         }
         
+        // Thread-safe task storage
+        lock.lock()
         downloadTasks[fileId] = task
-        defer { downloadTasks.removeValue(forKey: fileId) }
+        lock.unlock()
         
-        return try await task.value
+        do {
+            let result = try await task.value
+            
+            // Thread-safe task cleanup
+            lock.lock()
+            downloadTasks.removeValue(forKey: fileId)
+            lock.unlock()
+            
+            return result
+        } catch {
+            // Thread-safe task cleanup on error
+            lock.lock()
+            downloadTasks.removeValue(forKey: fileId)
+            lock.unlock()
+            throw error
+        }
     }
     
     private func getCachedVideoURL(for fileId: String) -> URL? {
-        guard let cachePath = cachePath else { return nil }
-        // Use ".mp4" extension for consistent lookups
+        guard !fileId.isEmpty,
+              let cachePath = cachePath else { return nil }
         let videoURL = cachePath.appendingPathComponent(fileId).appendingPathExtension("mp4")
         return fileManager.fileExists(atPath: videoURL.path) ? videoURL : nil
     }
     
     private func cacheVideo(from url: URL, fileId: String) async throws -> URL? {
-        guard let cachePath = cachePath else { return nil }
-        // Always end with ".mp4"
+        guard !fileId.isEmpty,
+              let cachePath = cachePath else { return nil }
+        
         let destinationURL = cachePath.appendingPathComponent(fileId).appendingPathExtension("mp4")
-
+        
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard let mimeType = response.mimeType, mimeType.starts(with: "video/") else {
                 print("❌ Invalid content type received")
-                throw NSError(domain: "", code: -1)
+                throw NSError(domain: "VideoLoader", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid content type"])
             }
             
-            // Remove old file to avoid partial/corrupt reuse
+            // Remove old file in a thread-safe way
             if fileManager.fileExists(atPath: destinationURL.path) {
-                try fileManager.removeItem(at: destinationURL)
+                try? fileManager.removeItem(at: destinationURL)
             }
-
+            
             try data.write(to: destinationURL)
             try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: destinationURL.path)
             print("💾 Cached video \(fileId) to disk at \(destinationURL)")
@@ -154,70 +192,145 @@ class VideoLoader {
             return nil
         }
     }
+    
+    func cleanup() {
+        lock.lock()
+        downloadTasks.forEach { $0.value.cancel() }
+        downloadTasks.removeAll()
+        lock.unlock()
+    }
+}
+
+// Thread-safe storage class that can be accessed from any context
+private final class ThreadSafeStorage {
+    private let lock = NSLock()
+    private var urlCache: [String: URL] = [:]
+    private let videoLoader = VideoLoader()
+    
+    func getURLCache() -> [String: URL] {
+        lock.lock()
+        defer { lock.unlock() }
+        return urlCache
+    }
+    
+    func setURLCache(_ cache: [String: URL]) {
+        lock.lock()
+        urlCache = cache
+        lock.unlock()
+    }
+    
+    func clearURLCache() {
+        lock.lock()
+        urlCache.removeAll()
+        lock.unlock()
+    }
+    
+    func cleanup() {
+        clearURLCache()
+        videoLoader.cleanup()
+    }
+    
+    func getVideoLoader() -> VideoLoader {
+        videoLoader
+    }
 }
 
 @MainActor
 class FeedViewModel: ObservableObject {
     @Published var projects: [VideoProject] = []
-    private var videoLoader = VideoLoader()
+    private var isLoadingFeed = false
+    private var cleanupTask: Task<Void, Never>?
+    private let storage = ThreadSafeStorage()
     
     // Keep these for URL management
     private var activeDownloads: Set<String> = []
-    var videoURLCache: [String: URL] = [:]
+    
+    var videoURLCache: [String: URL] {
+        get { storage.getURLCache() }
+        set { storage.setURLCache(newValue) }
+    }
     
     init() {
-        if let path = videoLoader.cachePath {
+        if let path = storage.getVideoLoader().cachePath {
             try? FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
         }
     }
     
+    func cleanupAllPlayers() {
+        print("🧹 Cleaning up video URL cache")
+        storage.cleanup()
+        cleanupTask?.cancel()
+    }
+    
+    nonisolated func cleanup() {
+        print("🗑️ FeedViewModel cleanup started")
+        storage.cleanup()
+        print("🗑️ FeedViewModel cleanup completed")
+    }
+    
+    deinit {
+        cleanup()
+    }
+    
     func loadFeedVideos() async {
+        guard !isLoadingFeed else { return }
+        isLoadingFeed = true
+        
         do {
             print("📚 Starting to load feed videos")
-            // Simplified async call
             let projects = try await AppwriteService.shared.listUserVideos()
-            self.projects = projects
-            print("📚 Loaded \(projects.count) videos")
             
-            // Start preloading first video if available
-            if !projects.isEmpty {
-                print("🔄 Preloading first video")
-                await preloadVideo(at: 0, currentIndex: 0)
+            await MainActor.run {
+                self.projects = projects
+                print("📚 Loaded \(projects.count) videos")
+                
+                // Start preloading first video if available
+                if !projects.isEmpty {
+                    print("🔄 Preloading first video")
+                    Task {
+                        await self.preloadVideo(at: 0, currentIndex: 0)
+                    }
+                }
             }
         } catch {
             print("❌ Error loading feed videos: \(error)")
         }
+        
+        isLoadingFeed = false
     }
     
     func preloadVideo(at index: Int, currentIndex: Int) async {
         guard index < projects.count else { return }
         
         let project = projects[index]
+        guard !project.videoFileId.isEmpty else { return }
         
         do {
             print("🔄 Preloading video at index \(index)")
-            let url = try await videoLoader.getVideoURL(for: project.videoFileId)
+            let url = try await storage.getVideoLoader().getVideoURL(for: project.videoFileId)
             
-            // Cache the URL
-            videoURLCache[project.videoFileId] = url
+            // Thread-safe URL cache update
+            var cache = storage.getURLCache()
+            cache[project.videoFileId] = url
+            storage.setURLCache(cache)
+            
         } catch {
             print("❌ Error preloading video: \(error)")
         }
     }
     
     func getVideoURL(for fileId: String) async throws -> URL {
-        let url = try await videoLoader.getVideoURL(for: fileId)
-        videoURLCache[fileId] = url
+        guard !fileId.isEmpty else {
+            throw NSError(domain: "FeedViewModel", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid fileId"])
+        }
+        
+        let url = try await storage.getVideoLoader().getVideoURL(for: fileId)
+        
+        var cache = storage.getURLCache()
+        cache[fileId] = url
+        storage.setURLCache(cache)
+        
         return url
-    }
-    
-    func cacheVideoURL(_ url: URL?, for fileId: String) {
-        // This method is no longer used in the new implementation
-    }
-    
-    func cleanupAllPlayers() {
-        print("🧹 Cleaning up video URL cache")
-        videoURLCache.removeAll()
     }
 }
 

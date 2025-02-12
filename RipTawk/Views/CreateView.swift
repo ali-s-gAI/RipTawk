@@ -325,22 +325,60 @@ class CameraManager: NSObject, ObservableObject {
         
         self.audioInput = audioInput
         
+        // Set session preset for 720p resolution
+        captureSession.sessionPreset = .hd1280x720
+        print("✅ [CAMERA] Set session preset to 720p")
+        
         if captureSession.canAddInput(videoInput) && captureSession.canAddInput(audioInput) {
             captureSession.addInput(videoInput)
             captureSession.addInput(audioInput)
             print("✅ [CAMERA] Added video and audio inputs")
         }
         
-        let videoOutput = AVCaptureMovieFileOutput()
-        if captureSession.canAddOutput(videoOutput) {
-            captureSession.addOutput(videoOutput)
-            self.videoOutput = videoOutput
-            print("✅ [CAMERA] Added video output")
-        }
+        setupMovieFileOutput()
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.captureSession.startRunning()
             print("✅ [CAMERA] Started capture session")
+        }
+    }
+    
+    private func setupMovieFileOutput() {
+        // Remove any existing output
+        if let existingOutput = videoOutput {
+            captureSession.removeOutput(existingOutput)
+        }
+        
+        let movieFileOutput = AVCaptureMovieFileOutput()
+        
+        if captureSession.canAddOutput(movieFileOutput) {
+            captureSession.addOutput(movieFileOutput)
+            print("✅ [CAMERA] Added movie file output")
+            
+            // --- VIDEO SETTINGS ---
+            let videoSettings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: 2_000_000, // 2 Mbps
+                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                    AVVideoMaxKeyFrameIntervalKey: 30, // Keyframe every 1 second at 30fps
+                    AVVideoAllowFrameReorderingKey: false // Reduce encoding latency
+                ]
+            ]
+            
+            // Configure video connection
+            if let videoConnection = movieFileOutput.connection(with: .video) {
+                if movieFileOutput.availableVideoCodecTypes.contains(.h264) {
+                    movieFileOutput.setOutputSettings(videoSettings, for: videoConnection)
+                    print("✅ [CAMERA] Set video compression settings")
+                } else {
+                    print("❌ [CAMERA] H.264 codec not available")
+                }
+            }
+            
+            self.videoOutput = movieFileOutput
+        } else {
+            print("❌ [CAMERA] Could not add movie file output to session")
         }
     }
     
