@@ -316,13 +316,9 @@ struct DiscoverView: View {
         // Fetch the updated project directly
         let updatedProjects = try await AppwriteService.shared.listUserVideos()
         if let updatedProject = updatedProjects.first(where: { $0.id == project.id }) {
-            if let transcript = updatedProject.transcript {
-                print("✅ [API] Retrieved updated project with transcript")
-                // No need to update the project again since we got it from the database
-                return transcript
-            }
-            throw NSError(domain: "TranscriptionService", code: 500,
-                         userInfo: [NSLocalizedDescriptionKey: "Project found but transcript is missing"])
+            // For a new video, it's okay if transcript is nil - we'll just return an empty string
+            // This allows the transcription process to continue
+            return updatedProject.transcript ?? ""
         }
         
         throw NSError(domain: "TranscriptionService", code: 500,

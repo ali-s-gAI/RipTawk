@@ -175,7 +175,11 @@ class AppwriteService {
                 "videoFileID": file.id,  // Changed to match expected field name
                 "duration": duration,
                 "createdAt": isoDate,
-                "userId": currentUserId
+                "userId": currentUserId,
+                "isTranscribed": false,  // Add required field
+                "transcript": nil,       // Initialize as nil
+                "description": nil,      // Initialize as nil
+                "tags": []              // Initialize as empty array
             ] as [String : Any]
         )
         print("📤 [UPLOAD] Video document created with ID: \(document.id)")
@@ -191,7 +195,7 @@ class AppwriteService {
             transcript: nil,
             isTranscribed: false,
             description: nil,
-            tags: nil
+            tags: []
         )
     }
     
