@@ -127,36 +127,43 @@ struct DiscoverView: View {
                 // Parse the response to get description and tags
                 if let data = transcript.data(using: .utf8),
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    let transcriptText = json["response"] as? String ?? ""
+                    print("📝 [TRANSCRIBE] Parsing JSON response: \(json)")
+                    
+                    // Extract fields using the correct keys from index.js
+                    let transcriptText = json["response"] as? String
                     let description = json["description"] as? String
-                    let tags = json["tickers"] as? [String]
+                    let tags = json["tags"] as? [String]  // Changed from "tickers" to "tags"
                     
-                    // Update project in Appwrite with all fields
-                    print("💾 [TRANSCRIBE] Updating project with transcription data...")
-                    try await AppwriteService.shared.updateProjectWithTranscription(
-                        projectId: project.id,
-                        transcript: transcriptText,
-                        description: description,
-                        tags: tags
-                    )
-                    print("✅ [TRANSCRIBE] Project updated with transcription data")
-                    
-                    // Update UI with description if available
-                    if let description = description {
-                        alertMessage = "Transcription complete!\nDescription: \(description)"
+                    if let transcriptText = transcriptText {
+                        print("📝 [TRANSCRIBE] Found transcript: \(transcriptText.prefix(100))...")
+                        print("📝 [TRANSCRIBE] Found description: \(description ?? "nil")")
+                        print("📝 [TRANSCRIBE] Found tags: \(tags ?? [])")
+                        
+                        // Update project in Appwrite with all fields
+                        print("💾 [TRANSCRIBE] Updating project with transcription data...")
+                        try await AppwriteService.shared.updateProjectWithTranscription(
+                            projectId: project.id,
+                            transcript: transcriptText,
+                            description: description,
+                            tags: tags
+                        )
+                        print("✅ [TRANSCRIBE] Project updated with transcription data")
+                        
+                        // Update UI with description if available
+                        if let description = description {
+                            alertMessage = "Transcription complete!\nDescription: \(description)"
+                        } else {
+                            alertMessage = "Transcription complete!"
+                        }
                     } else {
-                        alertMessage = "Transcription complete!"
+                        print("⚠️ [TRANSCRIBE] JSON response missing 'response' field")
+                        throw NSError(domain: "TranscriptionService", code: 500,
+                                   userInfo: [NSLocalizedDescriptionKey: "Invalid response format: missing transcript"])
                     }
                 } else {
-                    // Fallback to just updating transcript if JSON parsing fails
-                    print("⚠️ [TRANSCRIBE] Could not parse JSON response, updating transcript only")
-                    try await AppwriteService.shared.updateProjectWithTranscription(
-                        projectId: project.id,
-                        transcript: transcript,
-                        description: nil,
-                        tags: nil
-                    )
-                    alertMessage = "Transcript received!\n\(transcript.prefix(100))..."
+                    print("⚠️ [TRANSCRIBE] Could not parse response as JSON: \(transcript)")
+                    throw NSError(domain: "TranscriptionService", code: 500,
+                                userInfo: [NSLocalizedDescriptionKey: "Invalid JSON response"])
                 }
                 
                 showAlert = true
