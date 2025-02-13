@@ -10,6 +10,7 @@ import Appwrite
 
 struct ContentView: View {
     @State private var isAuthenticated: Bool
+    @State private var showSplash = true
     @State private var email = ""
     @State private var password = ""
     @State private var name = ""
@@ -23,25 +24,39 @@ struct ContentView: View {
     
     var body: some View {
         Group {
-            if isAuthenticated {
-                MainTabView()
+            if showSplash {
+                SplashView()
                     .onAppear {
-                        print(" [AUTH] Showing MainTabView - User is authenticated")
+                        print(" [SPLASH] Starting splash screen timer")
+                        // Show splash for 2.5 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                            print(" [SPLASH] Splash timer complete - transitioning to main content")
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                showSplash = false
+                            }
+                        }
                     }
             } else {
-                AuthenticationView(
-                    isAuthenticated: $isAuthenticated,
-                    email: $email,
-                    password: $password,
-                    name: $name,
-                    isSignUp: $isSignUp,
-                    errorMessage: $errorMessage,
-                    showError: $showError,
-                    onLogin: login,
-                    onSignUp: signUp
-                )
-                .onAppear {
-                    print(" [AUTH] Showing AuthenticationView - User is NOT authenticated")
+                if isAuthenticated {
+                    MainTabView()
+                        .onAppear {
+                            print(" [AUTH] Showing MainTabView - User is authenticated")
+                        }
+                } else {
+                    AuthenticationView(
+                        isAuthenticated: $isAuthenticated,
+                        email: $email,
+                        password: $password,
+                        name: $name,
+                        isSignUp: $isSignUp,
+                        errorMessage: $errorMessage,
+                        showError: $showError,
+                        onLogin: login,
+                        onSignUp: signUp
+                    )
+                    .onAppear {
+                        print(" [AUTH] Showing AuthenticationView - User is NOT authenticated")
+                    }
                 }
             }
         }
