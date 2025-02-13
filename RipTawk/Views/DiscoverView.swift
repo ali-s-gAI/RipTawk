@@ -270,41 +270,63 @@ struct DiscoverView: View {
         )
         
         print("🎙 [API] Response received: \(response)")
-        print("🎙 [API] Response body: '\(response.responseBody)'")  // Added quotes to see empty string
+        print("🎙 [API] Response body: '\(response.responseBody)'")
         print("🎙 [API] Response status: \(response.status)")
         
-        // If the status is completed but response is empty, the function succeeded in updating the document
-        if response.status == "completed" {
-            if response.responseBody.isEmpty {
-                print("✅ [API] Function completed successfully, document updated in Appwrite")
-                // Refresh the projects list to get the updated data
-                await fetchProjects()
-                return "Transcription completed successfully"
-            }
-            
-            // Try to parse the response as JSON to get the transcript
+        if response.status != "completed" {
+            // If status is not completed, try to parse error from response body
             if let data = response.responseBody.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                print("🎙 [API] Parsed response JSON: \(json)")
-                if let transcript = json["response"] as? String {
-                    return transcript
-                }
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let error = json["error"] as? String {
+                throw NSError(domain: "TranscriptionService", code: 500, 
+                            userInfo: [NSLocalizedDescriptionKey: "Function error: \(error)"])
             }
-            
-            // If we can't parse JSON but status is completed, consider it a success
-            return "Transcription completed successfully"
-        }
-        
-        // If status is not completed, try to parse error from response body
-        if let data = response.responseBody.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let error = json["error"] as? String {
             throw NSError(domain: "TranscriptionService", code: 500, 
-                         userInfo: [NSLocalizedDescriptionKey: "Function error: \(error)"])
+                         userInfo: [NSLocalizedDescriptionKey: "Function failed with status: \(response.status)"])
         }
         
-        throw NSError(domain: "TranscriptionService", code: 500, 
-                     userInfo: [NSLocalizedDescriptionKey: "Function failed with status: \(response.status)"])
+        // At this point, status is "completed"
+        // Try to parse the response as JSON first
+        if !response.responseBody.isEmpty,
+           let data = response.responseBody.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            print("🎙 [API] Parsed response JSON: \(json)")
+            
+            // Extract all relevant fields
+            let transcript = json["response"] as? String
+            let description = json["description"] as? String
+            let tags = json["tags"] as? [String]
+            
+            // Update the project with all fields
+            try await AppwriteService.shared.updateProjectWithTranscription(
+                projectId: project.id,
+                transcript: transcript ?? "",
+                description: description,
+                tags: tags
+            )
+            
+            return transcript ?? ""
+        }
+        
+        // If response body is empty or invalid JSON, wait briefly and fetch the updated project
+        print("🔄 [API] Function completed, fetching updated project data...")
+        // Wait a moment for the database to update
+        try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+        
+        // Fetch the updated project directly
+        let updatedProjects = try await AppwriteService.shared.listUserVideos()
+        if let updatedProject = updatedProjects.first(where: { $0.id == project.id }) {
+            if let transcript = updatedProject.transcript {
+                print("✅ [API] Retrieved updated project with transcript")
+                // No need to update the project again since we got it from the database
+                return transcript
+            }
+            throw NSError(domain: "TranscriptionService", code: 500,
+                         userInfo: [NSLocalizedDescriptionKey: "Project found but transcript is missing"])
+        }
+        
+        throw NSError(domain: "TranscriptionService", code: 500,
+                     userInfo: [NSLocalizedDescriptionKey: "Could not retrieve transcription data"])
     }
 }
 
