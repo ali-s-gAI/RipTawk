@@ -117,20 +117,48 @@ struct DiscoverView: View {
                 
                 // Call transcription service
                 print("🎙 [TRANSCRIBE] Calling transcription service...")
-                let transcript = try await callTranscriptionService(audioData: audioData)
+                let transcript = try await callTranscriptionService(audioData: audioData, project: project)
                 print("✅ [TRANSCRIBE] Transcription received: \(transcript.prefix(100))...")
                 
                 print("🧹 [TRANSCRIBE] Cleaning up temp file...")
                 try? FileManager.default.removeItem(at: audioURL)
                 print("✅ [TRANSCRIBE] Temp file cleaned up")
                 
-                // Update project in Appwrite
-                print("💾 [TRANSCRIBE] Updating project with transcript...")
-                try await AppwriteService.shared.updateProjectTranscript(projectId: project.id, transcript: transcript)
-                print("✅ [TRANSCRIBE] Project updated with transcript")
+                // Parse the response to get description and tags
+                if let data = transcript.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let transcriptText = json["response"] as? String ?? ""
+                    let description = json["description"] as? String
+                    let tags = json["tickers"] as? [String]
+                    
+                    // Update project in Appwrite with all fields
+                    print("💾 [TRANSCRIBE] Updating project with transcription data...")
+                    try await AppwriteService.shared.updateProjectWithTranscription(
+                        projectId: project.id,
+                        transcript: transcriptText,
+                        description: description,
+                        tags: tags
+                    )
+                    print("✅ [TRANSCRIBE] Project updated with transcription data")
+                    
+                    // Update UI with description if available
+                    if let description = description {
+                        alertMessage = "Transcription complete!\nDescription: \(description)"
+                    } else {
+                        alertMessage = "Transcription complete!"
+                    }
+                } else {
+                    // Fallback to just updating transcript if JSON parsing fails
+                    print("⚠️ [TRANSCRIBE] Could not parse JSON response, updating transcript only")
+                    try await AppwriteService.shared.updateProjectWithTranscription(
+                        projectId: project.id,
+                        transcript: transcript,
+                        description: nil,
+                        tags: nil
+                    )
+                    alertMessage = "Transcript received!\n\(transcript.prefix(100))..."
+                }
                 
-                // Update UI
-                alertMessage = "Transcript received!\n\(transcript.prefix(100))..."
                 showAlert = true
                 
                 // Refresh projects list
@@ -218,7 +246,7 @@ struct DiscoverView: View {
         return outputURL
     }
     
-    private func callTranscriptionService(audioData: Data) async throws -> String {
+    private func callTranscriptionService(audioData: Data, project: Project) async throws -> String {
         print("🎙 [API] Preparing transcription request...")
         
         // Create the request body with base64 encoded audio
@@ -228,7 +256,8 @@ struct DiscoverView: View {
         
         let requestBody: [String: Any] = [
             "audio": base64Audio,
-            "format": "m4a"
+            "format": "m4a",
+            "documentId": project.id
         ]
         
         let jsonString = requestBody.jsonString()
@@ -244,33 +273,38 @@ struct DiscoverView: View {
         print("🎙 [API] Response body: '\(response.responseBody)'")  // Added quotes to see empty string
         print("🎙 [API] Response status: \(response.status)")
         
-        // If the response is empty or failed, try to parse error from response body
-        if response.responseBody.isEmpty || response.status == "failed" {
-            // Try to parse error from response body
+        // If the status is completed but response is empty, the function succeeded in updating the document
+        if response.status == "completed" {
+            if response.responseBody.isEmpty {
+                print("✅ [API] Function completed successfully, document updated in Appwrite")
+                // Refresh the projects list to get the updated data
+                await fetchProjects()
+                return "Transcription completed successfully"
+            }
+            
+            // Try to parse the response as JSON to get the transcript
             if let data = response.responseBody.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                print("🎙 [API] Parsed error JSON: \(json)")
-                if let error = json["error"] as? String {
-                    throw NSError(domain: "TranscriptionService", code: 500, 
-                                 userInfo: [NSLocalizedDescriptionKey: "Function error: \(error)"])
+                print("🎙 [API] Parsed response JSON: \(json)")
+                if let transcript = json["response"] as? String {
+                    return transcript
                 }
             }
             
-            throw NSError(domain: "TranscriptionService", code: 500, 
-                         userInfo: [NSLocalizedDescriptionKey: "Function failed with status: \(response.status)"])
+            // If we can't parse JSON but status is completed, consider it a success
+            return "Transcription completed successfully"
         }
         
-        // Try to parse the response as JSON to get the transcript
+        // If status is not completed, try to parse error from response body
         if let data = response.responseBody.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            print("🎙 [API] Parsed response JSON: \(json)")
-            if let transcript = json["response"] as? String {
-                return transcript
-            }
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let error = json["error"] as? String {
+            throw NSError(domain: "TranscriptionService", code: 500, 
+                         userInfo: [NSLocalizedDescriptionKey: "Function error: \(error)"])
         }
         
-        // If we can't parse JSON, return the raw response
-        return response.responseBody
+        throw NSError(domain: "TranscriptionService", code: 500, 
+                     userInfo: [NSLocalizedDescriptionKey: "Function failed with status: \(response.status)"])
     }
 }
 

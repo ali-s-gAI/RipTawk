@@ -12,6 +12,8 @@ struct VideoProject: Identifiable, Codable {
     let userId: String        // Appwrite user ID
     let transcript: String?   // Optional transcript text
     let isTranscribed: Bool   // Flag to track transcription status
+    let description: String?  // AI-generated description
+    let tags: [String]?      // AI-extracted tags
     
     enum CodingKeys: String, CodingKey {
         case id = "$id"       // Appwrite uses $id for document IDs
@@ -22,6 +24,8 @@ struct VideoProject: Identifiable, Codable {
         case userId
         case transcript
         case isTranscribed
+        case description
+        case tags
     }
 }
 
@@ -185,7 +189,9 @@ class AppwriteService {
             createdAt: now,
             userId: currentUserId,
             transcript: nil,
-            isTranscribed: false
+            isTranscribed: false,
+            description: nil,
+            tags: nil
         )
     }
     
@@ -247,6 +253,8 @@ class AppwriteService {
                 
                 let transcript = data["transcript"]?.value as? String
                 let isTranscribed = data["isTranscribed"]?.value as? Bool ?? false
+                let description = data["description"]?.value as? String
+                let tags = data["tags"]?.value as? [String]
                 
                 return VideoProject(
                     id: doc.id,
@@ -256,7 +264,9 @@ class AppwriteService {
                     createdAt: createdAt,
                     userId: userId,
                     transcript: transcript,
-                    isTranscribed: isTranscribed
+                    isTranscribed: isTranscribed,
+                    description: description,
+                    tags: tags
                 )
             } catch {
                 print("❌ [DEBUG] Error parsing document \(doc.id): \(error)")
@@ -411,7 +421,9 @@ class AppwriteService {
             createdAt: project.createdAt,
             userId: currentUserId,
             transcript: project.transcript,
-            isTranscribed: project.isTranscribed
+            isTranscribed: project.isTranscribed,
+            description: project.description,
+            tags: project.tags
         )
         print("✅ [UPDATE] Returning updated project with new videoFileId: \(updatedProject.videoFileId)")
         return updatedProject
@@ -438,7 +450,9 @@ class AppwriteService {
             createdAt: project.createdAt,
             userId: project.userId,
             transcript: project.transcript,
-            isTranscribed: project.isTranscribed
+            isTranscribed: project.isTranscribed,
+            description: project.description,
+            tags: project.tags
         )
     }
     
@@ -483,6 +497,37 @@ class AppwriteService {
             print("✅ [UPDATE] Successfully added transcript")
         } catch {
             print("❌ [UPDATE] Error updating transcript: \(error)")
+            throw error
+        }
+    }
+    
+    // Add new method to update transcript with AI-generated content
+    func updateProjectWithTranscription(projectId: String, transcript: String, description: String?, tags: [String]?) async throws {
+        print("📝 [UPDATE] Adding transcription data to project: \(projectId)")
+        
+        var data: [String: Any] = [
+            "transcript": transcript,
+            "isTranscribed": true
+        ]
+        
+        if let description = description {
+            data["description"] = description
+        }
+        
+        if let tags = tags {
+            data["tags"] = tags
+        }
+        
+        do {
+            try await databases.updateDocument(
+                databaseId: databaseId,
+                collectionId: videosCollectionId,
+                documentId: projectId,
+                data: data
+            )
+            print("✅ [UPDATE] Successfully added transcription data")
+        } catch {
+            print("❌ [UPDATE] Error updating transcription data: \(error)")
             throw error
         }
     }
@@ -536,5 +581,20 @@ class AppwriteService {
         }
         
         return transcript
+    }
+    
+    // Add a new method to fetch user names
+    func getUserName(userId: String) async throws -> String {
+        do {
+            let user = try await account.get()
+            if user.id == userId {
+                return user.name
+            }
+            // If it's not the current user, return a formatted version of the ID
+            return "User \(String(userId.prefix(6)))"
+        } catch {
+            print("⚠️ Could not fetch user name: \(error)")
+            return "User \(String(userId.prefix(6)))"
+        }
     }
 } 

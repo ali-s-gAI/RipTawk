@@ -4,6 +4,55 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
+async function generateDescription(openai, transcript) {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4",
+    messages: [
+      {
+        role: "system",
+        content: "You are a financial content expert. Generate a concise description (maximum 48 characters) that captures the main financial insight or prediction from the given transcript."
+      },
+      {
+        role: "user",
+        content: transcript
+      }
+    ],
+    max_tokens: 50,
+    temperature: 0.3
+  });
+  
+  return response.choices[0].message.content.trim();
+}
+
+async function extractTickers(openai, transcript) {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4",
+    messages: [
+      {
+        role: "system",
+        content: `You are a financial expert that extracts and converts mentions of:
+        1. Companies to their stock tickers (e.g., "Microsoft" -> "MSFT")
+        2. Cryptocurrencies to their symbols (e.g., "Bitcoin" -> "BTC")
+        3. Commodities as is (e.g., "Gold" stays "Gold")
+        
+        Return ONLY the extracted items as a JSON array of strings, with NO additional text.
+        If nothing is found, return an empty array.
+        
+        Example output: ["MSFT", "AAPL", "BTC", "Gold"]`
+      },
+      {
+        role: "user",
+        content: transcript
+      }
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0
+  });
+  
+  const result = JSON.parse(response.choices[0].message.content);
+  return result.tickers || [];
+}
+
 export default async function(context) {
   try {
     console.log('🎯 Function triggered');
@@ -29,8 +78,15 @@ export default async function(context) {
       return { error: 'No payload received' };
     }
     
+    // Check for documentId early
+    if (!payload.documentId) {
+      console.error('❌ Missing documentId in payload');
+      return { error: 'Missing documentId parameter' };
+    }
+    console.log('📄 Processing document:', payload.documentId);
+    
     // Destructure audio and format from the payload
-    const { audio, format } = payload;
+    const { audio, format, documentId } = payload;
     console.log('📦 Audio value:', audio);
     console.log('📦 Audio type:', typeof audio);
     
@@ -93,10 +149,52 @@ export default async function(context) {
     console.log('📝 Transcript content:', transcription.text);
     console.log('🔍 Full transcription response:', JSON.stringify(transcription, null, 2));
     
+    // Generate description and extract tickers using GPT-4
+    console.log('🤖 Generating description using GPT-4...');
+    const description = await generateDescription(openai, transcription.text);
+    console.log('📝 Generated description:', description);
+    
+    console.log('🔍 Extracting tickers using GPT-4...');
+    const tags = await extractTickers(openai, transcription.text);
+    console.log('🏷 Extracted tickers:', tags);
+
+    // Update the document in Appwrite
+    try {
+      const databases = context.database;
+      const databaseId = "67a2ea9400210dd0d73b";  // main
+      const collectionId = "67a2eaa90034a69780ef";  // videos
+      const documentId = payload.documentId; // Make sure this is passed in the payload
+      
+      if (!documentId) {
+        throw new Error('Missing documentId in payload');
+      }
+
+      await databases.updateDocument(
+        databaseId,
+        collectionId,
+        documentId,
+        {
+          description: description,
+          tags: tags,
+          transcript: transcription.text,
+          isTranscribed: true
+        }
+      );
+      
+      console.log('✅ Updated Appwrite document with description and tags');
+    } catch (updateError) {
+      console.error('❌ Failed to update Appwrite document:', updateError);
+      throw updateError;
+    }
+
     await fs.promises.unlink(tempPath).catch(err => console.error('Error deleting temporary file:', err));
     
-    // Return the transcript text
-    return { response: transcription.text };
+    // Return the processed data
+    return {
+      response: transcription.text,
+      description: description,
+      tags: tags
+    };
     
   } catch (error) {
     console.error('❌ Function error:', error);

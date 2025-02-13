@@ -238,6 +238,7 @@ private final class ThreadSafeStorage {
 @MainActor
 class FeedViewModel: ObservableObject {
     @Published var projects: [VideoProject] = []
+    @Published var userNames: [String: String] = [:] // Map of userIds to names
     private var isLoadingFeed = false
     private var cleanupTask: Task<Void, Never>?
     private let storage = ThreadSafeStorage()
@@ -279,6 +280,22 @@ class FeedViewModel: ObservableObject {
         do {
             print("📚 Starting to load feed videos")
             let projects = try await AppwriteService.shared.listUserVideos()
+            
+            // Fetch user names for all unique user IDs
+            let uniqueUserIds = Set(projects.map { $0.userId })
+            for userId in uniqueUserIds {
+                do {
+                    let name = try await AppwriteService.shared.getUserName(userId: userId)
+                    await MainActor.run {
+                        self.userNames[userId] = name
+                    }
+                } catch {
+                    print("⚠️ Could not fetch name for user \(userId): \(error)")
+                    await MainActor.run {
+                        self.userNames[userId] = "Unknown User"
+                    }
+                }
+            }
             
             await MainActor.run {
                 self.projects = projects
@@ -346,6 +363,11 @@ struct FeedVideoView: View {
     @State private var lastTapPosition: CGPoint = .zero
     @State private var showVideoEditor = false
     @State private var isLoading = false
+    @State private var showAIInsights = false  // New state for AI sheet
+    
+    var userName: String {
+        viewModel.userNames[project.userId] ?? "Loading..."
+    }
     
     var body: some View {
         ZStack {
@@ -412,12 +434,27 @@ struct FeedVideoView: View {
                 HStack(alignment: .bottom) {
                     // Video info on the left
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Author: \(project.userId)")
+                        Text(userName)
                             .font(.appHeadline())
                         Text(project.title)
                             .font(.appBody())
-                        Text("Video description...")
-                            .font(.appCaption())
+                        if let description = project.description {
+                            Text(description)
+                                .font(.appCaption())
+                        }
+                        if let tags = project.tags, !tags.isEmpty {
+                            HStack(spacing: 4) {
+                                ForEach(tags, id: \.self) { tag in
+                                    Text(tag)
+                                        .font(.appCaption())
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.brandPrimary.opacity(0.2))
+                                        .cornerRadius(12)
+                                }
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                     .foregroundColor(.white)
                     .padding()
@@ -433,10 +470,10 @@ struct FeedVideoView: View {
                         )
                         
                         ActionButton(
-                            icon: "bubble.right",
-                            text: "0",
+                            icon: "sparkles",
+                            text: "AI",
                             action: {
-                                // Implement comment action
+                                showAIInsights = true
                             }
                         )
                         
@@ -504,6 +541,11 @@ struct FeedVideoView: View {
                         }
                     }
             }
+        }
+        .sheet(isPresented: $showAIInsights) {
+            AIInsightsView(project: project)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
     }
     
@@ -826,5 +868,69 @@ struct CoinParticle: View {
                     }
                 }
             }
+    }
+}
+
+// Add new AIInsightsView
+struct AIInsightsView: View {
+    let project: VideoProject
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // Header
+            HStack {
+                Text("AI Insights")
+                    .font(.appTitle())
+                    .foregroundColor(.primary)
+                Spacer()
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.bottom, 8)
+            
+            // Description Section
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Description")
+                    .font(.appHeadline())
+                    .foregroundColor(.secondary)
+                Text(project.description ?? "No description available")
+                    .font(.appBody())
+                    .foregroundColor(.primary)
+            }
+            
+            // Tags Section
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tags")
+                    .font(.appHeadline())
+                    .foregroundColor(.secondary)
+                
+                if let tags = project.tags, !tags.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(tags, id: \.self) { tag in
+                                Text(tag)
+                                    .font(.appCaption())
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.brandPrimary.opacity(0.2))
+                                    .cornerRadius(16)
+                            }
+                        }
+                    }
+                } else {
+                    Text("No tags available")
+                        .font(.appBody())
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Spacer()
+        }
+        .padding()
+        .background(Color(.systemBackground))
     }
 }
