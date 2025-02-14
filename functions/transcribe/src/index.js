@@ -172,10 +172,11 @@ export default async function(context) {
 
     // Update the document in Appwrite
     try {
-      const databases = context.database;
+      // Get the database client from the SDK
+      const databases = context.services.database;
       const databaseId = "67a2ea9400210dd0d73b";  // main
       const collectionId = "67a2eaa90034a69780ef";  // videos
-      const documentId = payload.documentId; // Make sure this is passed in the payload
+      const documentId = payload.documentId;
       
       if (!documentId) {
         throw new Error('Missing documentId in payload');
