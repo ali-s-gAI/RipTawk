@@ -11,6 +11,11 @@ import VideoEditorSDK
 @main
 struct RipTawkApp: App {
     @StateObject private var authState = AuthState()
+    @AppStorage("isDarkMode") private var isDarkMode: Bool?
+    
+    private var effectiveColorScheme: ColorScheme? {
+        isDarkMode.map { $0 ? .dark : .light }
+    }
     
     init() {
         // Initialize VideoEditorSDK license
@@ -68,6 +73,7 @@ struct RipTawkApp: App {
             .task {
                 await authState.checkSession()
             }
+            .preferredColorScheme(effectiveColorScheme)
         }
     }
 }

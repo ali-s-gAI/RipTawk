@@ -25,6 +25,15 @@ struct SettingsView: View {
     @State private var newPassword = ""
     @State private var confirmPassword = ""
     
+    @Environment(\.colorScheme) private var systemColorScheme
+    
+    private var effectiveColorScheme: ColorScheme {
+        if let isDarkMode {
+            return isDarkMode ? .dark : .light
+        }
+        return systemColorScheme
+    }
+    
     var body: some View {
         NavigationStack {
             Form {
@@ -65,12 +74,13 @@ struct SettingsView: View {
                     Text("Profile")
                 }
                 
-                // Appearance Section
+                // Updated Appearance Section
                 Section {
                     Picker("Appearance", selection: .init(
                         get: { isDarkMode },
                         set: { newValue in
                             isDarkMode = newValue
+                            UserDefaults.standard.synchronize()
                         }
                     )) {
                         Text("System").tag(Optional<Bool>.none)
@@ -111,6 +121,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .preferredColorScheme(effectiveColorScheme)
             .onAppear(perform: loadUserData)
             .alert("Error", isPresented: $showError) {
                 Button("OK", role: .cancel) { }
