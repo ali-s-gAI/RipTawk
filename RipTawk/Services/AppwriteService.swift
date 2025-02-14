@@ -5,15 +5,15 @@ import JSONCodable
 
 struct VideoProject: Identifiable, Codable {
     let id: String            // Appwrite document ID
-    let title: String
+    var title: String
     let videoFileId: String   // Appwrite storage file ID
     let duration: TimeInterval
     let createdAt: Date
     let userId: String        // Appwrite user ID
-    let transcript: String?   // Optional transcript text
-    let isTranscribed: Bool   // Flag to track transcription status
-    let description: String?  // AI-generated description
-    let tags: [String]?      // AI-extracted tags
+    var transcript: String?   // Optional transcript text
+    var isTranscribed: Bool   // Flag to track transcription status
+    var description: String?  // AI-generated description
+    var tags: [String]?      // AI-extracted tags
     
     enum CodingKeys: String, CodingKey {
         case id = "$id"       // Appwrite uses $id for document IDs
@@ -599,6 +599,33 @@ class AppwriteService {
         } catch {
             print("⚠️ Could not fetch user name: \(error)")
             return "User \(String(userId.prefix(6)))"
+        }
+    }
+    
+    func updateProjectMetadata(projectId: String, description: String?, tags: [String]?) async throws {
+        print("📝 [UPDATE] Updating project metadata for: \(projectId)")
+        
+        var data: [String: Any] = [:]
+        
+        if let description = description {
+            data["description"] = description
+        }
+        
+        if let tags = tags {
+            data["tags"] = tags
+        }
+        
+        do {
+            try await databases.updateDocument(
+                databaseId: databaseId,
+                collectionId: videosCollectionId,
+                documentId: projectId,
+                data: data
+            )
+            print("✅ [UPDATE] Successfully updated project metadata")
+        } catch {
+            print("❌ [UPDATE] Error updating project metadata: \(error)")
+            throw error
         }
     }
 } 

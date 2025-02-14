@@ -12,6 +12,7 @@ import VideoEditorSDK
 struct RipTawkApp: App {
     @StateObject private var authState = AuthState()
     @AppStorage("isDarkMode") private var isDarkMode: Bool?
+    @StateObject private var projectManager = ProjectManager()
     
     private var effectiveColorScheme: ColorScheme? {
         isDarkMode.map { $0 ? .dark : .light }
@@ -66,8 +67,10 @@ struct RipTawkApp: App {
                     ProgressView("Loading...")
                 } else if authState.isAuthenticated {
                     ContentView(isAuthenticated: true)
+                        .environmentObject(projectManager)
                 } else {
                     ContentView(isAuthenticated: false)
+                        .environmentObject(projectManager)
                 }
             }
             .task {

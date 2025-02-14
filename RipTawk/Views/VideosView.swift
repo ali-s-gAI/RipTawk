@@ -12,7 +12,7 @@ import VideoEditorSDK
 import UIKit
 
 struct VideosView: View {
-    @StateObject private var projectManager = ProjectManager()
+    @EnvironmentObject private var projectManager: ProjectManager
     @State private var showMediaPicker = false
     @State private var editingProject: VideoProject?
     @State private var showTitleEdit = false
@@ -29,10 +29,14 @@ struct VideosView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 1) {
                     ForEach(projectManager.projects) { project in
-                        ProjectGridItem(project: project, onTitleTap: {
-                            editingProject = project
-                            showTitleEdit = true
-                        })
+                        ProjectGridItem(
+                            project: project,
+                            projectManager: projectManager,
+                            onTitleTap: {
+                                editingProject = project
+                                showTitleEdit = true
+                            }
+                        )
                         .transition(.scale)
                         .contextMenu {
                             Button(role: .destructive) {
@@ -111,15 +115,34 @@ struct VideosView: View {
 struct ProjectGridItem: View {
     let project: VideoProject
     let onTitleTap: () -> Void
+    @ObservedObject var projectManager: ProjectManager
     @State private var thumbnail: UIImage?
     @State private var editedTitle: String
     @State private var showEditor = false
     @State private var isPressed = false
-
-    init(project: VideoProject, onTitleTap: @escaping () -> Void) {
+    
+    // Project deletion states
+    @State private var projectToDelete: VideoProject?
+    @State private var showDeleteConfirmation = false
+    
+    // New state variables for edit sheets
+    @State private var showTitleEdit = false
+    @State private var showDescriptionEdit = false
+    @State private var showTagsEdit = false
+    @State private var showTranscriptView = false
+    
+    // New state variables for editing
+    @State private var newTitle: String = ""
+    @State private var newDescription: String = ""
+    @State private var newTags: String = ""
+    @State private var errorMessage: String = ""
+    @State private var showError = false
+    
+    init(project: VideoProject, projectManager: ProjectManager, onTitleTap: @escaping () -> Void) {
         self.project = project
+        self.projectManager = projectManager
         self.onTitleTap = onTitleTap
-        self._editedTitle = State(initialValue: project.title)
+        self.editedTitle = project.title
     }
 
     var body: some View {
@@ -187,6 +210,166 @@ struct ProjectGridItem: View {
             .padding(4)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                newTitle = project.title
+                showTitleEdit = true
+            } label: {
+                Label("Edit Title", systemImage: "pencil")
+            }
+            
+            Button {
+                newDescription = project.description ?? ""
+                showDescriptionEdit = true
+            } label: {
+                Label("Edit Description", systemImage: "text.justify")
+            }
+            
+            Button {
+                newTags = (project.tags ?? []).joined(separator: ", ")
+                showTagsEdit = true
+            } label: {
+                Label("Edit Tags", systemImage: "tag")
+            }
+            
+            Button {
+                showTranscriptView = true
+            } label: {
+                Label("View Transcript", systemImage: "text.quote")
+            }
+            
+            Divider()
+            
+            Button(role: .destructive) {
+                projectToDelete = project
+                showDeleteConfirmation = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .sheet(isPresented: $showTitleEdit) {
+            NavigationView {
+                Form {
+                    TextField("Title", text: $newTitle)
+                        .submitLabel(.done)
+                        .textInputAutocapitalization(.words)
+                }
+                .navigationTitle("Edit Title")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showTitleEdit = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            updateTitle()
+                        }
+                        .disabled(newTitle.isEmpty)
+                    }
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                                         to: nil, from: nil, for: nil)
+                        }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showDescriptionEdit) {
+            NavigationView {
+                Form {
+                    TextEditor(text: $newDescription)
+                        .frame(minHeight: 100)
+                        .submitLabel(.done)
+                        .scrollDismissesKeyboard(.interactively)
+                        .ignoresSafeArea(.keyboard, edges: .bottom)
+                }
+                .navigationTitle("Edit Description")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showDescriptionEdit = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            updateDescription()
+                        }
+                    }
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                                         to: nil, from: nil, for: nil)
+                        }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showTagsEdit) {
+            NavigationView {
+                Form {
+                    TextField("Tags (comma separated)", text: $newTags)
+                        .submitLabel(.done)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    Text("Separate tags with commas")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .navigationTitle("Edit Tags")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showTagsEdit = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            updateTags()
+                        }
+                    }
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                                         to: nil, from: nil, for: nil)
+                        }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showTranscriptView) {
+            NavigationView {
+                ScrollView {
+                    if let transcript = project.transcript {
+                        Text(transcript)
+                            .padding()
+                    } else {
+                        Text("No transcript available")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
+                }
+                .navigationTitle("Transcript")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    Button("Done") {
+                        showTranscriptView = false
+                    }
+                }
+            }
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
         .fullScreenCover(isPresented: $showEditor) {
             VideoEditorSwiftUIView(video: nil, existingProject: project)
                 .overlay(alignment: .topLeading) {
@@ -261,6 +444,102 @@ struct ProjectGridItem: View {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    private func updateTitle() {
+        Task {
+            do {
+                let updatedProject = try await AppwriteService.shared.updateProjectTitle(project, newTitle: newTitle)
+                // Update the project in the ProjectManager
+                if let index = projectManager.projects.firstIndex(where: { $0.id == project.id }) {
+                    projectManager.projects[index] = updatedProject
+                }
+                await MainActor.run {
+                    showTitleEdit = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to update title: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        }
+    }
+    
+    private func updateDescription() {
+        Task {
+            do {
+                try await AppwriteService.shared.updateProjectMetadata(
+                    projectId: project.id,
+                    description: newDescription,
+                    tags: project.tags
+                )
+                // Update the project in the ProjectManager
+                if let index = projectManager.projects.firstIndex(where: { $0.id == project.id }) {
+                    let updatedProject = VideoProject(
+                        id: project.id,
+                        title: project.title,
+                        videoFileId: project.videoFileId,
+                        duration: project.duration,
+                        createdAt: project.createdAt,
+                        userId: project.userId,
+                        transcript: project.transcript,
+                        isTranscribed: project.isTranscribed,
+                        description: newDescription,
+                        tags: project.tags
+                    )
+                    projectManager.projects[index] = updatedProject
+                }
+                await MainActor.run {
+                    showDescriptionEdit = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to update description: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        }
+    }
+    
+    private func updateTags() {
+        let tags = newTags.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        
+        Task {
+            do {
+                try await AppwriteService.shared.updateProjectMetadata(
+                    projectId: project.id,
+                    description: project.description,
+                    tags: tags
+                )
+                // Update the project in the ProjectManager
+                if let index = projectManager.projects.firstIndex(where: { $0.id == project.id }) {
+                    let updatedProject = VideoProject(
+                        id: project.id,
+                        title: project.title,
+                        videoFileId: project.videoFileId,
+                        duration: project.duration,
+                        createdAt: project.createdAt,
+                        userId: project.userId,
+                        transcript: project.transcript,
+                        isTranscribed: project.isTranscribed,
+                        description: project.description,
+                        tags: tags
+                    )
+                    projectManager.projects[index] = updatedProject
+                }
+                await MainActor.run {
+                    showTagsEdit = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to update tags: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        }
     }
 }
 

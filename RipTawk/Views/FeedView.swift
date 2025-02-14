@@ -14,13 +14,14 @@ struct FeedView: View {
     @StateObject private var viewModel = FeedViewModel()
     @State private var scrollPosition: String?
     @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var projectManager: ProjectManager
     
     init() {}  // Remove UITabBar appearance configuration
     
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(viewModel.projects) { project in
+                ForEach(projectManager.projects) { project in
                     FeedVideoView(
                         project: project,
                         isActive: scrollPosition == project.id,
@@ -40,14 +41,14 @@ struct FeedView: View {
         .onAppear {
             Task { @MainActor in
                 // If we already have projects but no scroll position, restore it
-                if !viewModel.projects.isEmpty && scrollPosition == nil {
-                    scrollPosition = viewModel.projects.first?.id
+                if !projectManager.projects.isEmpty && scrollPosition == nil {
+                    scrollPosition = projectManager.projects.first?.id
                     // Preload the first video again
                     await viewModel.preloadVideo(at: 0, currentIndex: 0)
-                } else if viewModel.projects.isEmpty {
+                } else if projectManager.projects.isEmpty {
                     // Only load feed videos if we don't have any
-                    await viewModel.loadFeedVideos()
-                    if let firstId = viewModel.projects.first?.id {
+                    await projectManager.loadProjects()
+                    if let firstId = projectManager.projects.first?.id {
                         scrollPosition = firstId
                     }
                 }
@@ -63,7 +64,7 @@ struct FeedView: View {
                 // Reload current video when becoming active
                 if let currentPosition = scrollPosition {
                     Task {
-                        if let index = viewModel.projects.firstIndex(where: { $0.id == currentPosition }) {
+                        if let index = projectManager.projects.firstIndex(where: { $0.id == currentPosition }) {
                             await viewModel.preloadVideo(at: index, currentIndex: index)
                         }
                     }
@@ -364,10 +365,7 @@ struct FeedVideoView: View {
     @State private var showVideoEditor = false
     @State private var isLoading = false
     @State private var showAIInsights = false  // New state for AI sheet
-    
-    var userName: String {
-        viewModel.userNames[project.userId] ?? "Loading..."
-    }
+    @State private var userName: String = "Loading..."  // Add local state
     
     var body: some View {
         ZStack {
@@ -509,6 +507,18 @@ struct FeedVideoView: View {
         .onAppear {
             print("📱 FeedVideoView appeared for \(project.id)")
             loadVideoIfNeeded()
+            // Add user name loading
+            Task {
+                do {
+                    let name = try await AppwriteService.shared.getUserName(userId: project.userId)
+                    print("👤 Loaded user name for \(project.userId): \(name)")
+                    await MainActor.run {
+                        userName = name
+                    }
+                } catch {
+                    print("❌ Failed to load user name for \(project.userId): \(error)")
+                }
+            }
         }
         .onChange(of: isActive) { _, newValue in
             if newValue {
