@@ -366,6 +366,14 @@ struct FeedVideoView: View {
     @State private var isLoading = false
     @State private var showAIInsights = false  // New state for AI sheet
     @State private var userName: String = "Loading..."  // Add local state
+    @State private var isSharing = false
+    @State private var shareItem: ShareItem?
+    
+    // Add this struct inside FeedVideoView
+    struct ShareItem: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
     
     var body: some View {
         ZStack {
@@ -478,9 +486,7 @@ struct FeedVideoView: View {
                         ActionButton(
                             icon: "arrowshape.turn.up.forward",
                             text: "Share",
-                            action: {
-                                // Implement share action
-                            }
+                            action: handleShare
                         )
                         
                         ActionButton(
@@ -556,6 +562,13 @@ struct FeedVideoView: View {
             AIInsightsView(project: project)
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+        }
+        // Replace the existing share sheet presentation with this
+        .sheet(item: $shareItem) { item in
+            ShareSheet(items: [item.url])
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+                .ignoresSafeArea()
         }
     }
     
@@ -691,6 +704,20 @@ struct FeedVideoView: View {
                     print("❌ Error loading video for editing: \(error)")
                     // You might want to show an error alert here
                 }
+            }
+        }
+    }
+    
+    private func handleShare() {
+        Task {
+            do {
+                let url = try await AppwriteService.shared.getShareableURL(fileId: project.videoFileId)
+                print("🔗 Generated share URL: \(url)")
+                await MainActor.run {
+                    shareItem = ShareItem(url: url)  // Use ShareItem instead of separate URL and bool
+                }
+            } catch {
+                print("❌ Failed to generate share URL: \(error)")
             }
         }
     }
@@ -942,5 +969,38 @@ struct AIInsightsView: View {
         }
         .padding()
         .background(Color(.systemBackground))
+    }
+}
+
+// Update ShareSheet to be more robust
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: items,
+            applicationActivities: nil
+        )
+        
+        // Fix iPad presentation
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = UIView()
+            popover.permittedArrowDirections = []
+            popover.sourceRect = CGRect(x: UIScreen.main.bounds.midX, 
+                                      y: UIScreen.main.bounds.midY, 
+                                      width: 0, height: 0)
+        }
+        
+        // Add completion handler
+        controller.completionWithItemsHandler = { _, _, _, _ in
+            // Handle completion if needed
+            print("✅ Share sheet dismissed")
+        }
+        
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {
+        // Update if needed
     }
 }

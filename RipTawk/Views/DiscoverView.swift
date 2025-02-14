@@ -70,116 +70,114 @@ struct DiscoverView: View {
     }
     
     private func transcribeProject(_ project: Project) {
-        print("🎬 [TRANSCRIBE] Starting transcription for project: \(project.id)")
-        
-        guard let videoURL = project.videoURL else {
-            print("❌ [TRANSCRIBE] No video URL found for project: \(project.id)")
-            alertMessage = "Video URL not found"
-            showAlert = true
-            return
-        }
-        
-        print("📍 [TRANSCRIBE] Video URL: \(videoURL.absoluteString)")
+        print("🎬 [TRANSCRIBE] Starting transcription pipeline for project: \(project.id)")
+        print("📊 [TRANSCRIBE] Initial project state:")
+        print("  - Title: \(project.title)")
+        print("  - Video File ID: \(project.videoFileID)")
+        print("  - Is Transcribed: \(project.isTranscribed)")
         
         Task {
             do {
-                // Create temporary output URL for audio
+                // STEP 1: Get video URL and extract audio
+                print("\n📍 [STEP 1] Getting video URL and extracting audio")
+                let videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileID)
+                print("  - Video URL: \(videoURL.absoluteString)")
+                
                 let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
                     .appendingPathComponent(UUID().uuidString)
                     .appendingPathExtension("m4a")
-                print("📝 [TRANSCRIBE] Created temp output URL: \(outputURL.path)")
+                print("  - Temp audio output path: \(outputURL.path)")
                 
-                // Convert video to audio
-                print("🎵 [TRANSCRIBE] Starting audio extraction...")
                 let audioURL = try await extractAudio(from: videoURL, outputURL: outputURL)
-                print("✅ [TRANSCRIBE] Audio extraction complete: \(audioURL.path)")
-                
-                // Test audio playback
-                print("🔊 [TRANSCRIBE] Testing audio playback...")
-                let player = try AVAudioPlayer(contentsOf: audioURL)
-                print("🔊 [TRANSCRIBE] Audio duration: \(player.duration) seconds")
-                print("🔊 [TRANSCRIBE] Audio format: \(player.format)")
-                print("🔊 [TRANSCRIBE] Number of channels: \(player.numberOfChannels)")
-                
-                // Get audio file size for debugging
-                let audioFileSize = try FileManager.default.attributesOfItem(atPath: audioURL.path)[.size] as? Int64 ?? 0
-                print("📊 [TRANSCRIBE] Audio file size: \(Float(audioFileSize) / 1024 / 1024) MB")
-                
-                // Check if audio file is valid
-                if player.duration < 0.1 || audioFileSize < 1000 {
-                    throw NSError(domain: "AudioExtraction", code: 3, 
-                                userInfo: [NSLocalizedDescriptionKey: "Audio file appears to be empty or invalid"])
-                }
-                
-                print("📤 [TRANSCRIBE] Reading audio data...")
                 let audioData = try Data(contentsOf: audioURL)
-                print("✅ [TRANSCRIBE] Audio data loaded: \(audioData.count) bytes")
+                print("  - Extracted audio size: \(Float(audioData.count) / 1024 / 1024) MB")
                 
-                // Call transcription service
-                print("🎙 [TRANSCRIBE] Calling transcription service...")
-                let transcript = try await callTranscriptionService(audioData: audioData, project: project)
-                print("✅ [TRANSCRIBE] Transcription received: \(transcript.prefix(100))...")
+                // STEP 2: Send to Whisper API
+                print("\n📍 [STEP 2] Sending audio to Whisper API")
+                let requestBody: [String: Any] = [
+                    "audio": audioData.base64EncodedString(),
+                    "format": "m4a",
+                    "documentId": project.id
+                ]
+                print("  - Request payload size: \(Float(requestBody.jsonString().count) / 1024 / 1024) MB")
                 
-                print("🧹 [TRANSCRIBE] Cleaning up temp file...")
-                try? FileManager.default.removeItem(at: audioURL)
-                print("✅ [TRANSCRIBE] Temp file cleaned up")
+                // STEP 3: Get transcription
+                print("\n📍 [STEP 3] Getting transcription from Whisper")
+                let response = try await AppwriteService.shared.functions.createExecution(
+                    functionId: AppwriteService.shared.transcriptionFunctionId,
+                    body: requestBody.jsonString()
+                )
+                print("  - Response status: \(response.status)")
+                print("  - Response body length: \(response.responseBody.count) chars")
+                print("  - Response preview: \(String(response.responseBody.prefix(200)))")
                 
-                // Parse the response to get description and tags
-                if let data = transcript.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    print("📝 [TRANSCRIBE] Parsing JSON response: \(json)")
+                // STEP 4: Update project with transcription
+                print("\n📍 [STEP 4] Parsing response and updating project")
+                if response.responseBody.isEmpty {
+                    print("⚠️ Empty response body - checking for direct database update")
+                    try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
                     
-                    // Extract fields using the correct keys from index.js
-                    let transcriptText = json["response"] as? String
-                    let description = json["description"] as? String
-                    let tags = json["tags"] as? [String]  // Changed from "tickers" to "tags"
-                    
-                    if let transcriptText = transcriptText {
-                        print("📝 [TRANSCRIBE] Found transcript: \(transcriptText.prefix(100))...")
-                        print("📝 [TRANSCRIBE] Found description: \(description ?? "nil")")
-                        print("📝 [TRANSCRIBE] Found tags: \(tags ?? [])")
+                    let updatedProjects = try await AppwriteService.shared.listUserVideos()
+                    if let updatedProject = updatedProjects.first(where: { $0.id == project.id }) {
+                        print("  - Found updated project:")
+                        print("    - Transcript exists: \(updatedProject.transcript != nil)")
+                        print("    - Is Transcribed: \(updatedProject.isTranscribed)")
+                        print("    - Has Description: \(updatedProject.description != nil)")
+                        print("    - Tags count: \(updatedProject.tags?.count ?? 0)")
+                    } else {
+                        print("❌ Could not find updated project in database")
+                    }
+                } else {
+                    print("  - Attempting to parse response JSON")
+                    if let data = response.responseBody.data(using: .utf8),
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        print("  - Parsed JSON successfully")
+                        print("  - Available keys: \(json.keys.joined(separator: ", "))")
                         
-                        // Update project in Appwrite with all fields
-                        print("💾 [TRANSCRIBE] Updating project with transcription data...")
+                        let transcript = json["response"] as? String
+                        let description = json["description"] as? String
+                        let tags = json["tags"] as? [String]
+                        
+                        print("  - Found transcript: \(transcript?.prefix(100) ?? "nil")")
+                        print("  - Found description: \(description ?? "nil")")
+                        print("  - Found tags: \(tags ?? [])")
+                        
+                        // Update project
                         try await AppwriteService.shared.updateProjectWithTranscription(
                             projectId: project.id,
-                            transcript: transcriptText,
+                            transcript: transcript ?? "",
                             description: description,
                             tags: tags
                         )
-                        print("✅ [TRANSCRIBE] Project updated with transcription data")
-                        
-                        // Update UI with description if available
-                        if let description = description {
-                            alertMessage = "Transcription complete!\nDescription: \(description)"
-                        } else {
-                            alertMessage = "Transcription complete!"
-                        }
+                        print("✅ Project updated successfully")
                     } else {
-                        print("⚠️ [TRANSCRIBE] JSON response missing 'response' field")
-                        throw NSError(domain: "TranscriptionService", code: 500,
-                                   userInfo: [NSLocalizedDescriptionKey: "Invalid response format: missing transcript"])
+                        print("❌ Failed to parse response as JSON")
+                        print("Raw response: \(response.responseBody)")
                     }
-                } else {
-                    print("⚠️ [TRANSCRIBE] Could not parse response as JSON: \(transcript)")
-                    throw NSError(domain: "TranscriptionService", code: 500,
-                                userInfo: [NSLocalizedDescriptionKey: "Invalid JSON response"])
                 }
                 
-                showAlert = true
+                // Clean up
+                print("\n📍 [CLEANUP] Removing temporary audio file")
+                try? FileManager.default.removeItem(at: audioURL)
                 
-                // Refresh projects list
-                print("🔄 [TRANSCRIBE] Refreshing projects list...")
-                await fetchProjects()
-                print("✅ [TRANSCRIBE] Process complete for project: \(project.id)")
+                // Final verification
+                print("\n📍 [VERIFICATION] Checking final project state")
+                let finalProjects = try await AppwriteService.shared.listUserVideos()
+                if let finalProject = finalProjects.first(where: { $0.id == project.id }) {
+                    print("Final project state:")
+                    print("  - Is Transcribed: \(finalProject.isTranscribed)")
+                    print("  - Has Transcript: \(finalProject.transcript != nil)")
+                    print("  - Has Description: \(finalProject.description != nil)")
+                    print("  - Tags Count: \(finalProject.tags?.count ?? 0)")
+                }
                 
             } catch {
-                print("❌ [TRANSCRIBE] Error: \(error.localizedDescription)")
-                if let urlError = error as? URLError {
-                    print("🔍 [TRANSCRIBE] URL Error details:")
-                    print("  - Code: \(urlError.code.rawValue)")
-                    print("  - Description: \(urlError.localizedDescription)")
-                    print("  - Failed URL: \(urlError.failureURLString ?? "none")")
+                print("\n❌ [ERROR] Pipeline failed:")
+                print("  - Error: \(error.localizedDescription)")
+                if let nsError = error as NSError? {
+                    print("  - Domain: \(nsError.domain)")
+                    print("  - Code: \(nsError.code)")
+                    print("  - User Info: \(nsError.userInfo)")
                 }
                 alertMessage = "Error: \(error.localizedDescription)"
                 showAlert = true
@@ -281,25 +279,33 @@ struct DiscoverView: View {
         print("🎙 [API] Response status: \(response.status)")
         
         if response.status != "completed" {
-            // If status is not completed, try to parse error from response body
-            if let data = response.responseBody.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = json["error"] as? String {
-                throw NSError(domain: "TranscriptionService", code: 500, 
-                            userInfo: [NSLocalizedDescriptionKey: "Function error: \(error)"])
-            }
             throw NSError(domain: "TranscriptionService", code: 500, 
                          userInfo: [NSLocalizedDescriptionKey: "Function failed with status: \(response.status)"])
         }
         
-        // At this point, status is "completed"
-        // Try to parse the response as JSON first
-        if !response.responseBody.isEmpty,
-           let data = response.responseBody.data(using: .utf8),
+        // Handle empty response body
+        if response.responseBody.isEmpty {
+            print("⚠️ [API] Response body is empty, waiting for project update...")
+            // Wait briefly for the database to update
+            try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+            
+            // Fetch the updated project
+            let updatedProjects = try await AppwriteService.shared.listUserVideos()
+            if let updatedProject = updatedProjects.first(where: { $0.id == project.id }),
+               let transcript = updatedProject.transcript {
+                return transcript
+            } else {
+                throw NSError(domain: "TranscriptionService", code: 500,
+                             userInfo: [NSLocalizedDescriptionKey: "Could not retrieve transcription after completion"])
+            }
+        }
+        
+        // Try to parse the response as JSON
+        if let data = response.responseBody.data(using: .utf8),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             print("🎙 [API] Parsed response JSON: \(json)")
             
-            // Extract all relevant fields
+            // Extract fields
             let transcript = json["response"] as? String
             let description = json["description"] as? String
             let tags = json["tags"] as? [String]
@@ -315,21 +321,8 @@ struct DiscoverView: View {
             return transcript ?? ""
         }
         
-        // If response body is empty or invalid JSON, wait briefly and fetch the updated project
-        print("🔄 [API] Function completed, fetching updated project data...")
-        // Wait a moment for the database to update
-        try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-        
-        // Fetch the updated project directly
-        let updatedProjects = try await AppwriteService.shared.listUserVideos()
-        if let updatedProject = updatedProjects.first(where: { $0.id == project.id }) {
-            // For a new video, it's okay if transcript is nil - we'll just return an empty string
-            // This allows the transcription process to continue
-            return updatedProject.transcript ?? ""
-        }
-        
         throw NSError(domain: "TranscriptionService", code: 500,
-                     userInfo: [NSLocalizedDescriptionKey: "Could not retrieve transcription data"])
+                     userInfo: [NSLocalizedDescriptionKey: "Invalid JSON response"])
     }
 }
 
@@ -427,13 +420,27 @@ struct DocumentPicker: UIViewControllerRepresentable {
 struct Project: Identifiable {
     let id: String
     let title: String
+    let videoFileID: String
     let videoURL: URL?
+    let duration: Double
+    let createdAt: Date
+    let userId: String
+    let transcript: String?
     let isTranscribed: Bool
+    let description: String?
+    let tags: [String]?
     
-    init(id: String, title: String, videoURL: URL?, isTranscribed: Bool = false) {
+    init(id: String, title: String, videoFileID: String, videoURL: URL? = nil, duration: Double, createdAt: Date, userId: String, transcript: String? = nil, isTranscribed: Bool = false, description: String? = nil, tags: [String]? = nil) {
         self.id = id
         self.title = title
+        self.videoFileID = videoFileID
         self.videoURL = videoURL
+        self.duration = duration
+        self.createdAt = createdAt
+        self.userId = userId
+        self.transcript = transcript
         self.isTranscribed = isTranscribed
+        self.description = description
+        self.tags = tags
     }
 }

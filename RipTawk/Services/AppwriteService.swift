@@ -473,8 +473,15 @@ class AppwriteService {
             let project = Project(
                 id: videoProject.id,
                 title: videoProject.title,
-                videoURL: videoURL,  // Use actual URL instead of just cached
-                isTranscribed: videoProject.isTranscribed
+                videoFileID: videoProject.videoFileId,
+                videoURL: videoURL,
+                duration: videoProject.duration,
+                createdAt: videoProject.createdAt,
+                userId: videoProject.userId,
+                transcript: videoProject.transcript,
+                isTranscribed: videoProject.isTranscribed,
+                description: videoProject.description,
+                tags: videoProject.tags
             )
             projects.append(project)
         }
@@ -627,5 +634,27 @@ class AppwriteService {
             print("❌ [UPDATE] Error updating project metadata: \(error)")
             throw error
         }
+    }
+    
+    func getShareableURL(fileId: String) async throws -> URL {
+        // Base URL for file view
+        let urlString = "\(client.endPoint)/storage/buckets/\(videoBucketId)/files/\(fileId)/view"
+        
+        guard var components = URLComponents(string: urlString) else {
+            throw NSError(domain: "AppwriteService", code: 400, 
+                         userInfo: [NSLocalizedDescriptionKey: "Invalid URL format"])
+        }
+        
+        // Add required query parameters
+        components.queryItems = [
+            URLQueryItem(name: "project", value: "riptawk")
+        ]
+        
+        guard let url = components.url else {
+            throw NSError(domain: "AppwriteService", code: 400, 
+                         userInfo: [NSLocalizedDescriptionKey: "Could not create share URL"])
+        }
+        
+        return url
     }
 } 

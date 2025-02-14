@@ -6,7 +6,7 @@ import os from 'os';
 
 async function generateDescription(openai, transcript) {
   const response = await openai.chat.completions.create({
-    model: "gpt-4",
+    model: "gpt-4o-mini",
     messages: [
       {
         role: "system",
@@ -26,7 +26,7 @@ async function generateDescription(openai, transcript) {
 
 async function extractTickers(openai, transcript) {
   const response = await openai.chat.completions.create({
-    model: "gpt-4",
+    model: "gpt-4o-mini",
     messages: [
       {
         role: "system",
@@ -35,22 +35,34 @@ async function extractTickers(openai, transcript) {
         2. Cryptocurrencies to their symbols (e.g., "Bitcoin" -> "BTC")
         3. Commodities as is (e.g., "Gold" stays "Gold")
         
-        Return ONLY the extracted items as a JSON array of strings, with NO additional text.
+        Return ONLY a JSON array of strings, with NO additional text.
         If nothing is found, return an empty array.
+        Format: ["TICKER1", "TICKER2"]
         
-        Example output: ["MSFT", "AAPL", "BTC", "Gold"]`
+        Example: For "Microsoft and Apple are doing well", return: ["MSFT", "AAPL"]`
       },
       {
         role: "user",
         content: transcript
       }
     ],
-    response_format: { type: "json_object" },
     temperature: 0
   });
   
-  const result = JSON.parse(response.choices[0].message.content);
-  return result.tickers || [];
+  try {
+    const content = response.choices[0].message.content.trim();
+    // Extract array portion using regex
+    const match = content.match(/\[.*\]/);
+    if (match) {
+      return JSON.parse(match[0]);
+    }
+    console.log("Could not find array in response:", content);
+    return [];
+  } catch (error) {
+    console.error('Failed to parse tickers response:', error);
+    console.log('Raw response:', response.choices[0].message.content);
+    return [];
+  }
 }
 
 export default async function(context) {
