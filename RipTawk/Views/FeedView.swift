@@ -1006,7 +1006,7 @@ struct MarketDataView: View {
                 }
             }
         }
-        .task {
+        .task(id: ticker) {
             await fetchMarketData()
         }
     }
@@ -1014,6 +1014,7 @@ struct MarketDataView: View {
     private func fetchMarketData() async {
         isLoading = true
         error = nil
+        marketData = nil // Reset data when fetching new ticker
         
         do {
             marketData = try await AppwriteService.shared.fetchMarketData(for: ticker)
@@ -1039,69 +1040,70 @@ struct AIInsightsView: View {
     @State private var selectedTicker: String?
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Header
-            HStack {
-                Text("AI Insights")
-                    .font(.appTitle())
-                    .foregroundColor(.primary)
-                Spacer()
-                Button(action: { dismiss() }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.bottom, 8)
-            
-            // Description Section
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Description")
-                    .font(.appHeadline())
-                    .foregroundColor(.secondary)
-                Text(project.description ?? "No description available")
-                    .font(.appBody())
-                    .foregroundColor(.primary)
-            }
-            
-            // Tags Section with Tappable Tickers
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Market Tickers")
-                    .font(.appHeadline())
-                    .foregroundColor(.secondary)
-                
-                if let tags = project.tags, !tags.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(tags, id: \.self) { tag in
-                                Button(action: { selectedTicker = tag }) {
-                                    Text(tag)
-                                        .font(.appBody())
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .background(selectedTicker == tag ? Color.brandPrimary : Color.brandPrimary.opacity(0.2))
-                                        .foregroundColor(selectedTicker == tag ? .white : .primary)
-                                        .cornerRadius(20)
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Description Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Description")
+                            .font(.appHeadline())
+                            .foregroundColor(.secondary)
+                        Text(project.description ?? "No description available")
+                            .font(.appBody())
+                            .foregroundColor(.primary)
+                    }
+                    
+                    // Tags Section with Tappable Tickers
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Market Tickers")
+                            .font(.appHeadline())
+                            .foregroundColor(.secondary)
+                        
+                        if let tags = project.tags, !tags.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(tags, id: \.self) { tag in
+                                        Button(action: { selectedTicker = tag }) {
+                                            Text(tag)
+                                                .font(.appBody())
+                                                .padding(.horizontal, 16)
+                                                .padding(.vertical, 8)
+                                                .background(selectedTicker == tag ? Color.brandPrimary : Color.brandPrimary.opacity(0.2))
+                                                .foregroundColor(selectedTicker == tag ? .white : .primary)
+                                                .cornerRadius(20)
+                                        }
+                                    }
                                 }
                             }
+                        } else {
+                            Text("No tickers found")
+                                .font(.appBody())
+                                .foregroundColor(.secondary)
                         }
                     }
-                } else {
-                    Text("No tickers found")
-                        .font(.appBody())
-                        .foregroundColor(.secondary)
+                    
+                    // Market Data Section
+                    if let ticker = selectedTicker {
+                        MarketDataView(ticker: ticker)
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("AI Insights")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
-            
-            // Market Data Section
-            if let ticker = selectedTicker {
-                MarketDataView(ticker: ticker)
-            }
-            
-            Spacer()
         }
-        .padding()
-        .background(Color(.systemBackground))
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled()
     }
 }
 
