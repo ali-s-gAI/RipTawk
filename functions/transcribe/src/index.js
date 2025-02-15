@@ -172,8 +172,8 @@ export default async function(context) {
 
     // Update the document in Appwrite
     try {
-      // Get the database client from the SDK
-      const databases = context.services.database;
+      // Get the database client from the context
+      const databases = context.services.databases;
       const databaseId = "67a2ea9400210dd0d73b";  // main
       const collectionId = "67a2eaa90034a69780ef";  // videos
       const documentId = payload.documentId;
@@ -181,6 +181,18 @@ export default async function(context) {
       if (!documentId) {
         throw new Error('Missing documentId in payload');
       }
+
+      console.log('📝 Updating document:', {
+        databaseId,
+        collectionId,
+        documentId,
+        data: {
+          description,
+          tags,
+          transcript: transcription.text,
+          isTranscribed: true
+        }
+      });
 
       await databases.updateDocument(
         databaseId,
@@ -197,6 +209,11 @@ export default async function(context) {
       console.log('✅ Updated Appwrite document with description and tags');
     } catch (updateError) {
       console.error('❌ Failed to update Appwrite document:', updateError);
+      console.error('Error details:', {
+        message: updateError.message,
+        stack: updateError.stack,
+        context: updateError.context
+      });
       throw updateError;
     }
 
