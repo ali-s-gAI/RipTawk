@@ -989,8 +989,10 @@ struct MarketDataView: View {
                         
                         Divider()
                         
-                        Text(news.content)
+                        // Remove content display since it's no longer in the model
+                        Text("Source: \(news.source)")
                             .font(.appBody())
+                            .foregroundColor(.secondary)
                     }
                     .padding()
                 }
