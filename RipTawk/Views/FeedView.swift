@@ -908,10 +908,133 @@ struct CoinParticle: View {
     }
 }
 
-// Add new AIInsightsView
+// Add new MarketDataView
+struct MarketDataView: View {
+    let ticker: String
+    @State private var marketData: MarketData?
+    @State private var isLoading = false
+    @State private var error: String?
+    @State private var selectedNews: NewsItem?
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Quote Section
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(ticker)
+                        .font(.appHeadline())
+                        .foregroundColor(.primary)
+                    Spacer()
+                    if isLoading {
+                        ProgressView()
+                    }
+                }
+                
+                if let quote = marketData?.quote {
+                    Text("$\(String(format: "%.2f", quote))")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.brandPrimary)
+                } else if let error = error {
+                    Text(error)
+                        .font(.appCaption())
+                        .foregroundColor(.red)
+                }
+            }
+            
+            // News Section
+            if let news = marketData?.news, !news.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Latest News")
+                        .font(.appHeadline())
+                        .foregroundColor(.secondary)
+                    
+                    ForEach(news, id: \.headline) { item in
+                        Button(action: { selectedNews = item }) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.headline)
+                                    .font(.appBody())
+                                    .foregroundColor(.primary)
+                                    .lineLimit(2)
+                                
+                                Text(item.source)
+                                    .font(.appCaption())
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.brandPrimary.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                    }
+                }
+            }
+        }
+        .sheet(item: $selectedNews) { news in
+            NavigationView {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(news.headline)
+                            .font(.appTitle())
+                            .padding(.bottom, 4)
+                        
+                        HStack {
+                            Text(news.source)
+                                .font(.appCaption())
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(formatDate(news.updated))
+                                .font(.appCaption())
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Divider()
+                        
+                        Text(news.content)
+                            .font(.appBody())
+                    }
+                    .padding()
+                }
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") {
+                            selectedNews = nil
+                        }
+                    }
+                }
+            }
+        }
+        .task {
+            await fetchMarketData()
+        }
+    }
+    
+    private func fetchMarketData() async {
+        isLoading = true
+        error = nil
+        
+        do {
+            marketData = try await AppwriteService.shared.fetchMarketData(for: ticker)
+        } catch {
+            self.error = "Failed to fetch market data"
+        }
+        
+        isLoading = false
+    }
+    
+    private func formatDate(_ timestamp: Int) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// Update AIInsightsView
 struct AIInsightsView: View {
     let project: VideoProject
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedTicker: String?
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -939,9 +1062,9 @@ struct AIInsightsView: View {
                     .foregroundColor(.primary)
             }
             
-            // Tags Section
+            // Tags Section with Tappable Tickers
             VStack(alignment: .leading, spacing: 8) {
-                Text("Tags")
+                Text("Market Tickers")
                     .font(.appHeadline())
                     .foregroundColor(.secondary)
                 
@@ -949,20 +1072,28 @@ struct AIInsightsView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(tags, id: \.self) { tag in
-                                Text(tag)
-                                    .font(.appCaption())
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Color.brandPrimary.opacity(0.2))
-                                    .cornerRadius(16)
+                                Button(action: { selectedTicker = tag }) {
+                                    Text(tag)
+                                        .font(.appBody())
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(selectedTicker == tag ? Color.brandPrimary : Color.brandPrimary.opacity(0.2))
+                                        .foregroundColor(selectedTicker == tag ? .white : .primary)
+                                        .cornerRadius(20)
+                                }
                             }
                         }
                     }
                 } else {
-                    Text("No tags available")
+                    Text("No tickers found")
                         .font(.appBody())
                         .foregroundColor(.secondary)
                 }
+            }
+            
+            // Market Data Section
+            if let ticker = selectedTicker {
+                MarketDataView(ticker: ticker)
             }
             
             Spacer()

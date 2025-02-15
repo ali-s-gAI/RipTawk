@@ -47,7 +47,9 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				marketData/package.json,
+				marketData/src/index.js,
 				transcribe/package.json,
+				transcribe/src/index.js,
 			);
 			target = 35566F052D516C4000682139 /* RipTawk */;
 		};
