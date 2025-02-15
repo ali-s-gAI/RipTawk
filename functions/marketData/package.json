@@ -1,8 +1,8 @@
 {
-  "name": "transcribe",
+  "name": "marketData",
   "version": "1.0.0",
-  "description": "Audio transcription function using OpenAI Whisper",
-  "main": "src/index.js",
+  "description": "Get stock info from MarketData API",
+  "main": "src/marketData.js",
   "type": "module",
   "scripts": {
     "install-deps": "npm install"
