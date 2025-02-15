@@ -43,6 +43,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		355081EB2D613F54002EA69B /* Exceptions for "functions" folder in "RipTawk" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				marketData/package.json,
+				transcribe/package.json,
+			);
+			target = 35566F052D516C4000682139 /* RipTawk */;
+		};
 		35934FFD2D52A4F300374E2F /* Exceptions for "RipTawk" folder in "RipTawk" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -73,6 +81,9 @@
 		};
 		357F88382D5C66D60016EB30 /* functions */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				355081EB2D613F54002EA69B /* Exceptions for "functions" folder in "RipTawk" target */,
+			);
 			path = functions;
 			sourceTree = "<group>";
 		};

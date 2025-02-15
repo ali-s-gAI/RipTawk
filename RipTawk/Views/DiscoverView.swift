@@ -46,6 +46,20 @@ struct DiscoverView: View {
                 .ignoresSafeArea()
                 
                 VStack(spacing: 20) {
+                    // Test Market Data Button
+                    Button(action: {
+                        Task {
+                            await AppwriteService.shared.testMarketData()
+                        }
+                    }) {
+                        Text("Test Market Data")
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(Color.blue)
+                            .cornerRadius(10)
+                    }
+                    .padding()
+                    
                     if isLoading {
                         // Loading state
                         VStack(spacing: 24) {

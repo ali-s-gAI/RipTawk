@@ -681,10 +681,13 @@ class AppwriteService {
         let jsonString = payload.jsonString()
         
         do {
+            print("📈 [MARKET] Calling function with payload: \(jsonString)")
             let response = try await functions.createExecution(
                 functionId: marketDataFunctionId,
                 body: jsonString
             )
+            
+            print("📈 [MARKET] Raw response: \(response.responseBody)")
             
             guard let data = response.responseBody.data(using: .utf8) else {
                 print("❌ [MARKET] Invalid response format")
@@ -697,6 +700,8 @@ class AppwriteService {
             
             let marketData = try JSONDecoder().decode(MarketData.self, from: data)
             print("✅ [MARKET] Successfully fetched data for \(ticker)")
+            print("📊 Quote: \(String(describing: marketData.quote))")
+            print("📰 News count: \(marketData.news.count)")
             return marketData
         } catch let error as DecodingError {
             print("❌ [MARKET] JSON decoding error: \(error)")
@@ -704,6 +709,22 @@ class AppwriteService {
         } catch {
             print("❌ [MARKET] Error fetching market data: \(error)")
             throw error
+        }
+    }
+    
+    // Test function
+    func testMarketData() async {
+        print("🧪 [TEST] Starting market data test...")
+        do {
+            let data = try await fetchMarketData(for: "AAPL")
+            print("✅ [TEST] Test successful!")
+            print("📊 Quote: \(String(describing: data.quote))")
+            print("📰 News items: \(data.news.count)")
+            if let firstNews = data.news.first {
+                print("📰 First headline: \(firstNews.headline)")
+            }
+        } catch {
+            print("❌ [TEST] Test failed: \(error)")
         }
     }
 } 
