@@ -35,11 +35,20 @@ struct MarketData: Codable {
     let news: [NewsItem]
 }
 
-struct NewsItem: Codable {
+struct NewsItem: Codable, Identifiable {
+    let id: String  // Add id property
     let headline: String
     let content: String
     let source: String
     let updated: Int
+    
+    init(headline: String, content: String, source: String, updated: Int) {
+        self.id = UUID().uuidString  // Generate unique ID
+        self.headline = headline
+        self.content = content
+        self.source = source
+        self.updated = updated
+    }
 }
 
 class AppwriteService {
@@ -687,10 +696,11 @@ class AppwriteService {
                 body: jsonString
             )
             
+            print("📈 [MARKET] Raw response length: \(response.responseBody.count)")
             print("📈 [MARKET] Raw response: \(response.responseBody)")
             
             guard let data = response.responseBody.data(using: .utf8) else {
-                print("❌ [MARKET] Invalid response format")
+                print("❌ [MARKET] Could not convert response to data")
                 throw NSError(
                     domain: "AppwriteService",
                     code: 500,
@@ -698,14 +708,19 @@ class AppwriteService {
                 )
             }
             
-            let marketData = try JSONDecoder().decode(MarketData.self, from: data)
-            print("✅ [MARKET] Successfully fetched data for \(ticker)")
-            print("📊 Quote: \(String(describing: marketData.quote))")
-            print("📰 News count: \(marketData.news.count)")
-            return marketData
-        } catch let error as DecodingError {
-            print("❌ [MARKET] JSON decoding error: \(error)")
-            throw error
+            print("📈 [MARKET] Response data length: \(data.count) bytes")
+            
+            do {
+                let marketData = try JSONDecoder().decode(MarketData.self, from: data)
+                print("✅ [MARKET] Successfully decoded MarketData")
+                print("📊 Quote: \(String(describing: marketData.quote))")
+                print("📰 News count: \(marketData.news.count)")
+                return marketData
+            } catch let decodingError as DecodingError {
+                print("❌ [MARKET] JSON decoding error: \(decodingError)")
+                print("❌ [MARKET] Failed JSON string: \(String(data: data, encoding: .utf8) ?? "nil")")
+                throw decodingError
+            }
         } catch {
             print("❌ [MARKET] Error fetching market data: \(error)")
             throw error

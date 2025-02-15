@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { randomUUID } from 'crypto';
 
 export default async function(context) {
   try {
@@ -63,15 +64,19 @@ export default async function(context) {
     
     // Process news items
     let newsItems = [];
-    if (Array.isArray(newsData)) {
-      newsItems = newsData.map(item => ({
-        headline: item.headline || '',
-        content: item.content || item.summary || '',
-        source: item.source || '',
-        updated: item.updated || Math.floor(Date.now() / 1000)
+    if (Array.isArray(newsData.headline)) {
+      // If we have arrays of data, zip them together
+      newsItems = newsData.headline.map((headline, index) => ({
+        id: randomUUID(),
+        headline: headline || '',
+        content: (newsData.content && newsData.content[index]) || '',
+        source: (newsData.source && newsData.source[index]) || '',
+        updated: (newsData.updated && newsData.updated[index]) || Math.floor(Date.now() / 1000)
       }));
     } else if (newsData && newsData.s === "ok" && newsData.headline) {
+      // Single news item
       newsItems = [{
+        id: randomUUID(),
         headline: newsData.headline,
         content: newsData.content || newsData.summary || '',
         source: newsData.source || '',
