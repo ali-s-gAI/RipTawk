@@ -1,7 +1,6 @@
 import fetch from 'node-fetch';
 
-/** @param {Object} context */
-module.exports = async function(context) {
+export default async function(context) {
   try {
     console.log('🎯 Market Data function triggered');
     
