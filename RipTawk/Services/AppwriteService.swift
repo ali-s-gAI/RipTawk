@@ -29,6 +29,19 @@ struct VideoProject: Identifiable, Codable {
     }
 }
 
+// New models for Market Data
+struct MarketData: Codable {
+    let quote: Double?
+    let news: [NewsItem]
+}
+
+struct NewsItem: Codable {
+    let headline: String
+    let content: String
+    let source: String
+    let updated: Int
+}
+
 class AppwriteService {
     static let shared = AppwriteService()
     
@@ -43,6 +56,7 @@ class AppwriteService {
     private let videosCollectionId = "67a2eaa90034a69780ef"  // videos
     private let videoBucketId = "67a2eabd002ffabdf95f"  // videos
     let transcriptionFunctionId = "67ac304b000401bf40eb"
+    let marketDataFunctionId = "67b102c00032516e278e"  // Add your actual function ID here
     @AppStorage("currentUserId") private var currentUserId: String = ""
     
     // This cache is cleared when app restarts
@@ -656,5 +670,40 @@ class AppwriteService {
         }
         
         return url
+    }
+    
+    // MARK: - Market Data
+    
+    func fetchMarketData(for ticker: String) async throws -> MarketData {
+        print("📈 [MARKET] Fetching data for ticker: \(ticker)")
+        
+        let payload: [String: Any] = ["ticker": ticker]
+        let jsonString = payload.jsonString()
+        
+        do {
+            let response = try await functions.createExecution(
+                functionId: marketDataFunctionId,
+                body: jsonString
+            )
+            
+            guard let data = response.responseBody.data(using: .utf8) else {
+                print("❌ [MARKET] Invalid response format")
+                throw NSError(
+                    domain: "AppwriteService",
+                    code: 500,
+                    userInfo: [NSLocalizedDescriptionKey: "Invalid response from market data function"]
+                )
+            }
+            
+            let marketData = try JSONDecoder().decode(MarketData.self, from: data)
+            print("✅ [MARKET] Successfully fetched data for \(ticker)")
+            return marketData
+        } catch let error as DecodingError {
+            print("❌ [MARKET] JSON decoding error: \(error)")
+            throw error
+        } catch {
+            print("❌ [MARKET] Error fetching market data: \(error)")
+            throw error
+        }
     }
 } 
