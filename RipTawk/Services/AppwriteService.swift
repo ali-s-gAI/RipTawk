@@ -36,19 +36,10 @@ struct MarketData: Codable {
 }
 
 struct NewsItem: Codable, Identifiable {
-    let id: String  // Add id property
+    let id: String
     let headline: String
-    let content: String
     let source: String
     let updated: Int
-    
-    init(headline: String, content: String, source: String, updated: Int) {
-        self.id = UUID().uuidString  // Generate unique ID
-        self.headline = headline
-        self.content = content
-        self.source = source
-        self.updated = updated
-    }
 }
 
 class AppwriteService {

@@ -68,8 +68,7 @@ export default async function(context) {
       // If we have arrays of data, zip them together
       newsItems = newsData.headline.map((headline, index) => ({
         id: randomUUID(),
-        headline: headline || '',
-        content: (newsData.content && newsData.content[index]) || '',
+        headline: headline.replace(/&amp;/g, '&').trim(),  // Clean up HTML entities
         source: (newsData.source && newsData.source[index]) || '',
         updated: (newsData.updated && newsData.updated[index]) || Math.floor(Date.now() / 1000)
       }));
@@ -77,8 +76,7 @@ export default async function(context) {
       // Single news item
       newsItems = [{
         id: randomUUID(),
-        headline: newsData.headline,
-        content: newsData.content || newsData.summary || '',
+        headline: newsData.headline.replace(/&amp;/g, '&').trim(),  // Clean up HTML entities
         source: newsData.source || '',
         updated: newsData.updated || Math.floor(Date.now() / 1000)
       }];
