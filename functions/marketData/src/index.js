@@ -15,14 +15,14 @@ export default async function(context) {
     const ticker = payload.ticker;
     if (!ticker) {
       console.log('❌ Missing ticker symbol');
-      return { error: "Missing ticker symbol" };
+      return context.res.json({ error: "Missing ticker symbol" });
     }
     
     // Get API key from environment variables
     const apiKey = process.env.MARKETDATA_API_KEY;
     if (!apiKey) {
       console.log('❌ Missing API key');
-      return { error: "Missing MARKETDATA_API_KEY environment variable" };
+      return context.res.json({ error: "Missing MARKETDATA_API_KEY environment variable" });
     }
     
     console.log('🔍 Fetching data for ticker:', ticker);
@@ -88,10 +88,10 @@ export default async function(context) {
     };
     
     console.log('✅ Returning response:', JSON.stringify(response, null, 2));
-    return response;
+    return context.res.json(response);
     
   } catch (error) {
     console.error("❌ Market Data function error:", error);
-    return { error: error.toString() };
+    return context.res.json({ error: error.toString() });
   }
 }

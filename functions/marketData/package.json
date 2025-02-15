@@ -1,8 +1,8 @@
 {
-  "name": "marketData",
+  "name": "marketdata",
   "version": "1.0.0",
   "description": "Get stock info from MarketData API",
-  "main": "src/marketData.js",
+  "main": "src/index.js",
   "type": "module",
   "scripts": {
     "install-deps": "npm install"

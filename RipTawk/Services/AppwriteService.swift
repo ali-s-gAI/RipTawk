@@ -689,6 +689,10 @@ class AppwriteService {
             
             print("📈 [MARKET] Raw response length: \(response.responseBody.count)")
             print("📈 [MARKET] Raw response: \(response.responseBody)")
+            print("📈 [MARKET] Response status: \(response.status)")
+            print("📈 [MARKET] Response function ID: \(response.functionId)")
+            print("📈 [MARKET] Response trigger: \(response.trigger)")
+            print("📈 [MARKET] Response duration: \(response.duration)ms")
             
             guard let data = response.responseBody.data(using: .utf8) else {
                 print("❌ [MARKET] Could not convert response to data")
@@ -700,6 +704,7 @@ class AppwriteService {
             }
             
             print("📈 [MARKET] Response data length: \(data.count) bytes")
+            print("📈 [MARKET] Response as string: \(String(data: data, encoding: .utf8) ?? "nil")")
             
             do {
                 let marketData = try JSONDecoder().decode(MarketData.self, from: data)
@@ -709,7 +714,14 @@ class AppwriteService {
                 return marketData
             } catch let decodingError as DecodingError {
                 print("❌ [MARKET] JSON decoding error: \(decodingError)")
-                print("❌ [MARKET] Failed JSON string: \(String(data: data, encoding: .utf8) ?? "nil")")
+                if let jsonObject = try? JSONSerialization.jsonObject(with: data),
+                   let prettyData = try? JSONSerialization.data(withJSONObject: jsonObject, options: .prettyPrinted),
+                   let prettyString = String(data: prettyData, encoding: .utf8) {
+                    print("❌ [MARKET] Failed JSON (pretty printed):\n\(prettyString)")
+                } else {
+                    print("❌ [MARKET] Failed JSON string: \(String(data: data, encoding: .utf8) ?? "nil")")
+                    print("❌ [MARKET] Raw bytes: \(Array(data))")
+                }
                 throw decodingError
             }
         } catch {
