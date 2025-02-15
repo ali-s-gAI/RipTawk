@@ -11,14 +11,14 @@ async function generateDescription(openai, transcript) {
     messages: [
       {
         role: "system",
-        content: "You are a financial content expert. Generate a concise description (maximum 48 characters) that captures the main financial insight or prediction from the given transcript."
+        content: "You are a social media short-form-video description generator. Generate a concise description (maximum 90 characters) that captures the main points, especially any financial insight or prediction, from the given transcript."
       },
       {
         role: "user",
         content: transcript
       }
     ],
-    max_tokens: 50,
+    max_tokens: 200,
     temperature: 0.3
   });
   

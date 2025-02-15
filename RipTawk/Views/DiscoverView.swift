@@ -8,46 +8,105 @@
 import SwiftUI
 import AVFoundation
 
+// Progress step model
+struct ProcessingStep: Identifiable {
+    let id = UUID()
+    let title: String
+    let icon: String
+    var isCompleted: Bool = false
+    var isLoading: Bool = false
+}
+
 struct DiscoverView: View {
     @State private var projects: [Project] = []
     @State private var isLoading = false
     @State private var alertMessage = ""
     @State private var showAlert = false
+    @State private var processingSteps: [ProcessingStep] = []
+    @State private var currentStepIndex: Int = 0
+    @State private var showProcessingSheet = false
+    
+    private let steps = [
+        ProcessingStep(title: "Getting video URL", icon: "link.circle"),
+        ProcessingStep(title: "Extracting audio", icon: "waveform"),
+        ProcessingStep(title: "Transcribing with AI", icon: "text.bubble"),
+        ProcessingStep(title: "Analyzing content", icon: "brain"),
+        ProcessingStep(title: "Saving results", icon: "checkmark.circle")
+    ]
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 20) {
-                if isLoading {
-                    ProgressView()
-                } else {
-                    List(projects) { project in
-                        Button(action: {
-                            transcribeProject(project)
-                        }) {
-                            HStack {
-                                Text(project.title)
-                                    .foregroundColor(.primary)
-                                Spacer()
-                                if !project.isTranscribed {
-                                    Image(systemName: "wand.and.stars")
-                    .foregroundColor(.blue)
+            ZStack {
+                // Background gradient
+                LinearGradient(
+                    gradient: Gradient(colors: [.black, Color.brandBackground]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 20) {
+                    if isLoading {
+                        // Loading state
+                        VStack(spacing: 24) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                                .tint(.brandPrimary)
+                            Text("Loading your projects...")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                        }
+                    } else {
+                        // Project list
+                        ScrollView {
+                            LazyVStack(spacing: 16) {
+                                ForEach(projects) { project in
+                                    ProjectCard(
+                                        project: project,
+                                        onTranscribe: {
+                                            startTranscription(project)
+                                        }
+                                    )
                                 }
+                                .padding(.horizontal)
+                            }
+                            .padding(.vertical)
+                        }
+                        
+                        if projects.isEmpty {
+                            VStack(spacing: 16) {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.brandPrimary)
+                                Text("No projects found")
+                                    .font(.title2)
+                                    .foregroundColor(.white)
+                                Text("Create a new project to get started")
+                                    .font(.subheadline)
+                                    .foregroundColor(.gray)
                             }
                         }
-                    }
-                    .listStyle(.inset)
-                    
-                    if projects.isEmpty {
-                        Text("No projects found")
-                            .foregroundColor(.secondary)
                     }
                 }
             }
             .navigationTitle("AI Hub")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(Color.black.opacity(0.8), for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .alert("Transcription Result", isPresented: $showAlert) {
-                Button("OK") { }
+                Button("OK", role: .cancel) {}
             } message: {
                 Text(alertMessage)
+            }
+            .sheet(isPresented: $showProcessingSheet) {
+                ProcessingView(steps: $processingSteps)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+                    .presentationBackground {
+                        Color.black.opacity(0.9)
+                            .ignoresSafeArea()
+                    }
             }
             .task {
                 await fetchProjects()
@@ -60,7 +119,6 @@ struct DiscoverView: View {
         defer { isLoading = false }
         
         do {
-            // Fetch projects from Appwrite
             projects = try await AppwriteService.shared.getProjects()
         } catch {
             print("Failed to fetch projects:", error)
@@ -69,118 +127,110 @@ struct DiscoverView: View {
         }
     }
     
+    private func startTranscription(_ project: Project) {
+        // Reset and show processing sheet
+        processingSteps = steps
+        currentStepIndex = 0
+        showProcessingSheet = true
+        
+        // Start transcription process
+        transcribeProject(project)
+    }
+    
+    private func updateStep(_ index: Int, isCompleted: Bool = false, isLoading: Bool = false) {
+        guard index < processingSteps.count else { return }
+        processingSteps[index].isCompleted = isCompleted
+        processingSteps[index].isLoading = isLoading
+        if isCompleted && index + 1 < processingSteps.count {
+            processingSteps[index + 1].isLoading = true
+        }
+    }
+    
     private func transcribeProject(_ project: Project) {
         print("🎬 [TRANSCRIBE] Starting transcription pipeline for project: \(project.id)")
-        print("📊 [TRANSCRIBE] Initial project state:")
-        print("  - Title: \(project.title)")
-        print("  - Video File ID: \(project.videoFileID)")
-        print("  - Is Transcribed: \(project.isTranscribed)")
         
         Task {
             do {
                 // STEP 1: Get video URL and extract audio
-                print("\n📍 [STEP 1] Getting video URL and extracting audio")
+                updateStep(0, isLoading: true)
                 let videoURL = try await AppwriteService.shared.getVideoURL(fileId: project.videoFileID)
-                print("  - Video URL: \(videoURL.absoluteString)")
+                updateStep(0, isCompleted: true)
                 
+                // Setup audio extraction
+                updateStep(1, isLoading: true)
                 let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
                     .appendingPathComponent(UUID().uuidString)
                     .appendingPathExtension("m4a")
-                print("  - Temp audio output path: \(outputURL.path)")
                 
                 let audioURL = try await extractAudio(from: videoURL, outputURL: outputURL)
                 let audioData = try Data(contentsOf: audioURL)
-                print("  - Extracted audio size: \(Float(audioData.count) / 1024 / 1024) MB")
+                updateStep(1, isCompleted: true)
                 
                 // STEP 2: Send to Whisper API
-                print("\n📍 [STEP 2] Sending audio to Whisper API")
+                updateStep(2, isLoading: true)
                 let requestBody: [String: Any] = [
                     "audio": audioData.base64EncodedString(),
                     "format": "m4a",
                     "documentId": project.id
                 ]
-                print("  - Request payload size: \(Float(requestBody.jsonString().count) / 1024 / 1024) MB")
                 
                 // STEP 3: Get transcription
-                print("\n📍 [STEP 3] Getting transcription from Whisper")
                 let response = try await AppwriteService.shared.functions.createExecution(
                     functionId: AppwriteService.shared.transcriptionFunctionId,
                     body: requestBody.jsonString()
                 )
-                print("  - Response status: \(response.status)")
-                print("  - Response body length: \(response.responseBody.count) chars")
-                print("  - Response preview: \(String(response.responseBody.prefix(200)))")
+                updateStep(2, isCompleted: true)
                 
-                // STEP 4: Update project with transcription
-                print("\n📍 [STEP 4] Parsing response and updating project")
+                // STEP 4: Process response
+                updateStep(3, isLoading: true)
                 if response.responseBody.isEmpty {
-                    print("⚠️ Empty response body - checking for direct database update")
                     try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-                    
                     let updatedProjects = try await AppwriteService.shared.listUserVideos()
                     if let updatedProject = updatedProjects.first(where: { $0.id == project.id }) {
-                        print("  - Found updated project:")
-                        print("    - Transcript exists: \(updatedProject.transcript != nil)")
-                        print("    - Is Transcribed: \(updatedProject.isTranscribed)")
-                        print("    - Has Description: \(updatedProject.description != nil)")
-                        print("    - Tags count: \(updatedProject.tags?.count ?? 0)")
-                    } else {
-                        print("❌ Could not find updated project in database")
+                        print("✅ Project updated successfully")
                     }
                 } else {
-                    print("  - Attempting to parse response JSON")
                     if let data = response.responseBody.data(using: .utf8),
                        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        print("  - Parsed JSON successfully")
-                        print("  - Available keys: \(json.keys.joined(separator: ", "))")
-                        
                         let transcript = json["response"] as? String
                         let description = json["description"] as? String
                         let tags = json["tags"] as? [String]
                         
-                        print("  - Found transcript: \(transcript?.prefix(100) ?? "nil")")
-                        print("  - Found description: \(description ?? "nil")")
-                        print("  - Found tags: \(tags ?? [])")
-                        
-                        // Update project
                         try await AppwriteService.shared.updateProjectWithTranscription(
                             projectId: project.id,
                             transcript: transcript ?? "",
                             description: description,
                             tags: tags
                         )
-                        print("✅ Project updated successfully")
-                    } else {
-                        print("❌ Failed to parse response as JSON")
-                        print("Raw response: \(response.responseBody)")
                     }
                 }
+                updateStep(3, isCompleted: true)
                 
-                // Clean up
-                print("\n📍 [CLEANUP] Removing temporary audio file")
+                // STEP 5: Cleanup and finish
+                updateStep(4, isLoading: true)
                 try? FileManager.default.removeItem(at: audioURL)
                 
-                // Final verification
-                print("\n📍 [VERIFICATION] Checking final project state")
                 let finalProjects = try await AppwriteService.shared.listUserVideos()
                 if let finalProject = finalProjects.first(where: { $0.id == project.id }) {
-                    print("Final project state:")
-                    print("  - Is Transcribed: \(finalProject.isTranscribed)")
-                    print("  - Has Transcript: \(finalProject.transcript != nil)")
-                    print("  - Has Description: \(finalProject.description != nil)")
-                    print("  - Tags Count: \(finalProject.tags?.count ?? 0)")
+                    print("✅ Transcription completed successfully")
+                }
+                updateStep(4, isCompleted: true)
+                
+                // Close sheet after a short delay
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await MainActor.run {
+                    showProcessingSheet = false
+                    alertMessage = "Transcription completed successfully!"
+                    showAlert = true
                 }
                 
             } catch {
-                print("\n❌ [ERROR] Pipeline failed:")
-                print("  - Error: \(error.localizedDescription)")
-                if let nsError = error as NSError? {
-                    print("  - Domain: \(nsError.domain)")
-                    print("  - Code: \(nsError.code)")
-                    print("  - User Info: \(nsError.userInfo)")
+                print("❌ Transcription failed:", error)
+                await MainActor.run {
+                    showProcessingSheet = false
+                    alertMessage = "Error: \(error.localizedDescription)"
+                    showAlert = true
                 }
-                alertMessage = "Error: \(error.localizedDescription)"
-                showAlert = true
             }
         }
     }
@@ -442,5 +492,151 @@ struct Project: Identifiable {
         self.isTranscribed = isTranscribed
         self.description = description
         self.tags = tags
+    }
+}
+
+// MARK: - Supporting Views
+
+struct ProjectCard: View {
+    let project: Project
+    let onTranscribe: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(project.title)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    
+                    Text(formatDuration(project.duration))
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+                
+                Button(action: onTranscribe) {
+                    HStack(spacing: 6) {
+                        if project.isTranscribed {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Done")
+                        } else {
+                            Image(systemName: "wand.and.stars")
+                            Text("Analyze")
+                        }
+                    }
+                    .font(.headline)
+                    .foregroundColor(project.isTranscribed ? .gray : .black)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        project.isTranscribed ? 
+                            Color.gray.opacity(0.3) : 
+                            Color.brandPrimary
+                    )
+                    .clipShape(Capsule())
+                }
+                .disabled(project.isTranscribed)
+            }
+            
+            if project.isTranscribed {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let description = project.description {
+                        Text(description)
+                            .font(.subheadline)
+                            .foregroundColor(.white)
+                    }
+                    
+                    if let tags = project.tags, !tags.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(tags, id: \.self) { tag in
+                                    Text(tag)
+                                        .font(.caption)
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(Color.brandPrimary.opacity(0.2))
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
+    
+    private func formatDuration(_ duration: Double) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+struct ProcessingView: View {
+    @Binding var steps: [ProcessingStep]
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Processing Your Video")
+                .font(.title2)
+                .foregroundColor(.white)
+            
+            VStack(spacing: 20) {
+                ForEach(steps) { step in
+                    HStack(spacing: 16) {
+                        ZStack {
+                            Circle()
+                                .fill(stepBackgroundColor(for: step))
+                                .frame(width: 36, height: 36)
+                            
+                            if step.isLoading {
+                                ProgressView()
+                                    .tint(.brandPrimary)
+                            } else {
+                                Image(systemName: step.icon)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(step.isCompleted ? .black : .white)
+                            }
+                        }
+                        
+                        Text(step.title)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        if step.isCompleted {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.brandPrimary)
+                        }
+                    }
+                }
+            }
+            .padding()
+            .background(Color.white.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .padding()
+    }
+    
+    private func stepBackgroundColor(for step: ProcessingStep) -> Color {
+        if step.isCompleted {
+            return .brandPrimary
+        } else if step.isLoading {
+            return .brandPrimary.opacity(0.2)
+        } else {
+            return .white.opacity(0.1)
+        }
     }
 }
