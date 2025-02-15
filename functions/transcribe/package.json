@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "node-fetch": "^3.3.0",
-    "openai": "^4.84.0"
+    "openai": "^4.84.0",
+    "appwrite": "^17.0.0"
   }
 }

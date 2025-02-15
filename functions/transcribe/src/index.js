@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { Client, Databases } from 'appwrite';
 
 async function generateDescription(openai, transcript) {
   const response = await openai.chat.completions.create({
@@ -170,17 +171,19 @@ export default async function(context) {
     const tags = await extractTickers(openai, transcription.text);
     console.log('🏷 Extracted tickers:', tags);
 
+    // Initialize Appwrite client
+    console.log('🔄 Initializing Appwrite client...');
+    const client = new Client()
+      .setEndpoint(process.env.APPWRITE_FUNCTION_ENDPOINT)
+      .setProject(process.env.APPWRITE_FUNCTION_PROJECT_ID)
+      .setKey(process.env.APPWRITE_FUNCTION_API_KEY);
+
+    const databases = new Databases(client);
+
     // Update the document in Appwrite
     try {
-      // Get the database client from the context
-      const databases = context.services.databases;
       const databaseId = "67a2ea9400210dd0d73b";  // main
       const collectionId = "67a2eaa90034a69780ef";  // videos
-      const documentId = payload.documentId;
-      
-      if (!documentId) {
-        throw new Error('Missing documentId in payload');
-      }
 
       console.log('📝 Updating document:', {
         databaseId,
