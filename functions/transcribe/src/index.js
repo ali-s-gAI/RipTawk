@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { Client, Databases } from 'appwrite';
+import { Client, Databases } from 'node-appwrite';
 
 async function generateDescription(openai, transcript) {
   const response = await openai.chat.completions.create({
